@@ -1,0 +1,36 @@
+{
+  "name": "opencode-jobs",
+  "version": "0.1.0",
+  "description": "Persistent node-local background jobs, monitors, schedules and loops for OpenCode V2",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/daniilpet/opencode-jobs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/daniilpet/opencode-jobs/issues"
+  },
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./tui": "./dist/tui.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node scripts/check.js",
+    "build": "node scripts/build.js",
+    "package": "node scripts/package-release.js"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "2.0.22",
+    "@opentui/core": "0.5.14",
+    "@opentui/solid": "0.5.14",
+    "@babel/core": "^7.28.0",
+    "babel-preset-solid": "1.9.12",
+    "solid-js": "1.9.12"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

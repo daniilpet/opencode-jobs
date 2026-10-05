@@ -1,0 +1,57 @@
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # These exact versions reproduce the initially checked runtime baseline.
+        node: ['20.19.0', '22.14.0']
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Immutable pins prevent mutable action tags changing the release checks.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run check
+      - run: npm run build
+      - run: npm run package
+      - name: Install the checked OpenCode host for isolated integration
+        if: matrix.node == '22.14.0'
+        # The shell delegation/storage/RPC contract is checked for 2.0.22 only.
+        run: npm install --prefix .runtime/cli @opencode/cli@2.0.22 --no-audit --no-fund
+      - name: Select the native CLI executable
+        if: matrix.node == '22.14.0'
+        run: |
+          node --input-type=module <<'JS'
+          import { accessSync, appendFileSync } from 'node:fs';
+          import { resolve } from 'node:path';
+          const binary = resolve('.runtime/cli/node_modules/@opencode/cli/bin', process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+          accessSync(binary);
+          appendFileSync(process.env.GITHUB_ENV, `OPENCODE_JOBS_CLI=${binary}\n`);
+          JS
+      - name: Isolated OpenCode integration (no model credentials)
+        if: matrix.node == '22.14.0'
+        run: node scripts/smoke.js
