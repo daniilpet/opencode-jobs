@@ -46,9 +46,11 @@ jobs:
         if: matrix.node == '22.14.0'
         run: |
           node --input-type=module <<'JS'
-          import { accessSync, appendFileSync } from 'node:fs';
+          import { accessSync, appendFileSync, readFileSync } from 'node:fs';
           import { resolve } from 'node:path';
-          const binary = resolve('.runtime/cli/node_modules/@opencode/cli/bin', process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+          const root = resolve('.runtime/cli/node_modules/@opencode/cli');
+          const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
+          const binary = resolve(root, manifest.bin.opencode);
           accessSync(binary);
           appendFileSync(process.env.GITHUB_ENV, `OPENCODE_JOBS_CLI=${binary}\n`);
           JS
