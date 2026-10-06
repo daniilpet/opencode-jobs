@@ -4,6 +4,8 @@
 
 ### Security
 
+- Atomically allocate a fresh integration-test root before copying files, refusing
+  existing explicit paths and preventing concurrent runs from sharing a root.
 - Add a live lockfile advisory gate before builds, including development dependencies,
   with daily/manual checks and retained reports on success or failure.
 - Analyze JavaScript and GitHub Actions with CodeQL security-extended queries,

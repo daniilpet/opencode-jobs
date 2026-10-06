@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { cp, mkdir, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Service } from '../vendor/client/promise/service.js';
+import { createSmokeRoot } from './smoke-root.js';
 
-const root = process.env.OPENCODE_JOBS_TEST_ROOT ?? join(process.platform === 'win32' ? join(tmpdir(), 'opencode') : join(homedir(), '.local', 'share'), `jobs-smoke-${Date.now()}`);
+const root = await createSmokeRoot(process.env.OPENCODE_JOBS_TEST_ROOT);
 const artifact = join(root, 'plugin');
 await cp(resolve('.runtime/package'), artifact, { recursive: true });
 const config = join(root, 'config', 'opencode');
