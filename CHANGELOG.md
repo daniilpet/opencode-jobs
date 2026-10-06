@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 - security preview
+
 ### Security
 
 - Atomically allocate a fresh integration-test root before copying files, refusing
@@ -26,8 +28,8 @@
 - Update vulnerable source dependencies with targeted Seroval/Babel overrides
   and add serialization/compiler compatibility checks to local and CI validation.
 
-These changes are not in v0.1.0. No security release has been published and existing
-installations have not been updated. Execution limits are not an OS sandbox or a
+These changes are not in v0.1.0. Existing installations require a separately
+reviewed manual update. Execution limits are not an OS sandbox or a
 hard real-time guarantee; third-party tools that ignore cancellation are excluded.
 
 ### Guidance

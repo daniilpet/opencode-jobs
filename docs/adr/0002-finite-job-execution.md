@@ -2,8 +2,8 @@
 
 ## 1. Status and context
 
-Accepted; implementation is **Unreleased**, not part of v0.1.0. Existing
-installations have not been updated. This decision supersedes ADR 0001's execution
+Accepted; implementation is included in **0.2.0 preview**, not part of v0.1.0.
+Existing installations require a manual update. This decision supersedes ADR 0001's execution
 of scheduled prompts in the original conversation. OpenCode 2.0.22 interrupts execution by session ID;
 it has no public atomic operation for interrupting one admitted prompt while
 preserving unrelated work in that same session. Stopping dispatch alone cannot
