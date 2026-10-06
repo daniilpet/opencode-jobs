@@ -16,10 +16,17 @@ const workdir = join(root, 'work');
 const registration = join(root, 'state', 'opencode', 'service.json');
 for (const directory of [config, anchor, workdir]) await mkdir(directory, { recursive: true, mode: 0o700 });
 let calls = 0;
+const guidanceRequests = [];
+const guidanceHeader = '## OpenCode jobs: выбор инструментов';
+const agentPrompts = { build: 'Local integration test. Follow the test tool request. Do not use other tools.', noShell: 'Local permissions test.', noTools: 'Local no-tools test.' };
 const mock = createServer(async (request, response) => {
   let raw = '';
   for await (const part of request) raw += part;
   const body = JSON.parse(raw || '{}');
+  const system = (body.messages ?? []).filter((item) => ['system', 'developer'].includes(item.role)).map((item) => typeof item.content === 'string' ? item.content : (item.content ?? []).map((part) => part.text ?? '').join('\n')).join('\n');
+  const users = (body.messages ?? []).filter((item) => item.role === 'user').map((item) => typeof item.content === 'string' ? item.content : (item.content ?? []).map((part) => part.text ?? '').join('\n')).join('\n');
+  const agent = /JOBS_SMOKE_AGENT:(build|noShell|noTools)/.exec(users)?.[1];
+  if (agent) guidanceRequests.push({ agent, tools: (body.tools ?? []).map((item) => item.function.name), system, originalPromptPreserved: system.includes(agentPrompts[agent]) });
   const last = body.messages?.at(-1);
   const text = typeof last?.content === 'string' ? last.content : JSON.stringify(last?.content ?? '');
   const marker = /JOBS_SMOKE_TOOL:(background|monitor)/.exec(text);
@@ -45,7 +52,7 @@ await new Promise((done) => mock.listen(0, '127.0.0.1', done));
 await writeFile(join(config, 'opencode.json'), JSON.stringify({
   model: 'smoke/smoke', plugins: [artifact], update: 'disable',
   providers: { smoke: { package: '@opencode/ai/providers/openai-compatible', env: ['OPENCODE_JOBS_SMOKE_KEY'], settings: { baseURL: `http://127.0.0.1:${mock.address().port}/v1` }, models: { smoke: { name: 'Local smoke', capabilities: { tools: true }, limit: { context: 32768, output: 1024 } } } } },
-  agents: { build: { system: 'Local integration test. Follow the test tool request. Do not use other tools.', permissions: [{ action: '*', resource: '*', effect: 'allow' }] }, noShell: { system: 'Local permissions test.', permissions: [{ action: 'shell', resource: '*', effect: 'deny' }] } },
+  agents: { build: { system: agentPrompts.build, permissions: [{ action: '*', resource: '*', effect: 'allow' }] }, noShell: { system: agentPrompts.noShell, permissions: [{ action: 'shell', resource: '*', effect: 'deny' }] }, noTools: { system: agentPrompts.noTools, permissions: [{ action: '*', resource: '*', effect: 'deny' }] } },
 }));
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/(?:API_KEY|TOKEN|SECRET|PASSWORD)/i.test(key)));
 Object.assign(env, {
@@ -98,13 +105,13 @@ try {
   pump = spawn(process.execPath, [join(artifact, 'src', 'pump.js')], { cwd: root, env, stdio: 'ignore', windowsHide: true });
   await until(async () => (await rpc('list', { sessionID })).healthy, 'pump healthy');
   for (const name of ['background', 'monitor']) {
-    await api(`/api/session/${sessionID}/prompt`, 'POST', { text: `JOBS_SMOKE_TOOL:${name}` });
+    await api(`/api/session/${sessionID}/prompt`, 'POST', { text: `JOBS_SMOKE_TOOL:${name}\nJOBS_SMOKE_AGENT:build` });
     const job = await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.kind === name && item.shellID), `${name} actual native tool execution`);
     await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.id === job.id && item.status === 'completed'), `${name} completion`);
     if (name === 'monitor') await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.id === job.id && item.delivery === 'sent'), 'monitor match notification');
     process.stdout.write(`PASS native ${name}\n`);
   }
-  await api(`/api/session/${sessionID}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background CANCEL_LONG' });
+  await api(`/api/session/${sessionID}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background CANCEL_LONG\nJOBS_SMOKE_AGENT:build' });
   const cancelShell = await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.kind === 'background' && item.status === 'active' && item.shellID), 'native cancellable shell');
   await rpc('cancel', { sessionID, id: cancelShell.id });
   assert.equal((await rpc('list', { sessionID })).jobs.find((item) => item.id === cancelShell.id).status, 'cancelled');
@@ -117,10 +124,14 @@ try {
   assert.ok(!data(await api('/api/shell', 'GET', undefined, workdir)).some((item) => item.id === lateShell.id && item.status === 'running'));
   process.stdout.write('PASS cancel before attach race\n');
   const forbiddenSession = data(await api('/api/session', 'POST', { title: 'OpenCode jobs permissions smoke', location: { directory: workdir }, agent: 'noShell', model: { providerID: 'smoke', id: 'smoke' } }));
-  await api(`/api/session/${forbiddenSession.id}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background' });
+  await api(`/api/session/${forbiddenSession.id}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background\nJOBS_SMOKE_AGENT:noShell' });
   await until(async () => data(await api(`/api/session/${forbiddenSession.id}/context`)).some((item) => JSON.stringify(item).includes('SMOKE_READY')), 'deny shell session response');
   assert.equal((await rpc('list', { sessionID: forbiddenSession.id })).jobs.length, 0);
   process.stdout.write('PASS shell permission denial\n');
+  const noToolsSession = data(await api('/api/session', 'POST', { title: 'OpenCode jobs no-tools guidance smoke', location: { directory: workdir }, agent: 'noTools', model: { providerID: 'smoke', id: 'smoke' } }));
+  await api(`/api/session/${noToolsSession.id}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background\nJOBS_SMOKE_AGENT:noTools' });
+  await until(async () => data(await api(`/api/session/${noToolsSession.id}/context`)).some((item) => JSON.stringify(item).includes('SMOKE_READY')), 'no-tools session response');
+  assert.equal((await rpc('list', { sessionID: noToolsSession.id })).jobs.length, 0);
   const scheduled = await rpc('create', { sessionID, name: 'schedule', raw: 'in 2s SMOKE_SCHEDULE' });
   await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.id === scheduled.job.id && item.delivery === 'sent'), 'schedule');
   const loop = await rpc('create', { sessionID, name: 'loop', raw: '10s SMOKE_LOOP' });
@@ -133,7 +144,7 @@ try {
   await rpc('cancel', { sessionID, id: loop.job.id });
   assert.equal((await rpc('list', { sessionID })).jobs.find((item) => item.id === loop.job.id).status, 'cancelled');
   const persisted = await rpc('create', { sessionID, name: 'schedule', raw: 'in 20s SMOKE_PERSISTED' });
-  await api(`/api/session/${sessionID}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background CANCEL_LONG' });
+  await api(`/api/session/${sessionID}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background CANCEL_LONG\nJOBS_SMOKE_AGENT:build' });
   const interrupted = await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.kind === 'background' && item.status === 'active' && item.shellID), 'native shell before restart');
   await Service.stop({ file: registration });
   await sleep(500);
@@ -149,7 +160,25 @@ try {
   start();
   endpoint = await until(() => Service.discover({ file: registration }), 'missed restart');
   await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.id === missed.job.id && item.status === 'missed' && item.delivery === 'sent'), 'missed failure notification');
-  await writeFile(join(root, 'report.json'), JSON.stringify({ ok: true, platform: process.platform, sessionID, mockCalls: calls, checks: ['plugin', 'commands', 'native background', 'native monitor notification', 'native shell cancel', 'cancel-before-attach race', 'shell permission deny', 'schedule', 'loop', 'cancel', 'restart persistence', 'interrupted shell failure without replay', 'missed deadline'] }, null, 2));
+  assert.equal(guidanceRequests.length, calls, 'every fixture model request captured independently of its system prompt');
+  assert.ok(guidanceRequests.some((item) => item.agent === 'build'), 'build requests captured');
+  assert.ok(guidanceRequests.some((item) => item.agent === 'noShell'), 'noShell requests captured');
+  assert.ok(guidanceRequests.some((item) => item.agent === 'noTools'), 'no-tools requests captured');
+  for (const item of guidanceRequests) {
+    assert.ok(item.originalPromptPreserved, `${item.agent}: original role prompt preserved in every request`);
+    const available = item.tools.filter((name) => name.startsWith('opencode_jobs_'));
+    assert.equal(item.system.split(guidanceHeader).length - 1, available.length ? 1 : 0, `${item.agent}: one guidance block only when jobs are available`);
+    const guidance = item.system.split(guidanceHeader)[1] ?? '';
+    for (const name of ['background', 'monitor', 'schedule', 'loop', 'jobs', 'cancel']) {
+      const id = `opencode_jobs_${name}`;
+      assert.equal(guidance.includes(id), available.includes(id), `${item.agent}: ${id} guidance matches model tool snapshot`);
+    }
+    if (item.agent === 'noShell') assert.ok(!available.includes('opencode_jobs_background') && !available.includes('opencode_jobs_monitor'));
+    if (item.agent === 'noTools') assert.equal(available.length, 0);
+  }
+  await writeFile(join(root, 'guidance-report.json'), JSON.stringify({ ok: true, requests: guidanceRequests.map(({ agent, tools, originalPromptPreserved }) => ({ agent, tools: tools.filter((name) => name.startsWith('opencode_jobs_')), originalPromptPreserved, guidanceMatchesTools: true })), limitation: 'Mock provider verifies prompt delivery, not real-model tool selection.' }, null, 2));
+  process.stdout.write('PASS native guidance delivery, original role prompts and permission-filtered tools\n');
+  await writeFile(join(root, 'report.json'), JSON.stringify({ ok: true, platform: process.platform, sessionID, mockCalls: calls, checks: ['plugin', 'commands', 'native background', 'native monitor notification', 'native shell cancel', 'cancel-before-attach race', 'shell permission deny', 'guidance delivery and original prompts', 'permission-filtered guidance', 'no-tools guidance omitted', 'schedule', 'loop', 'cancel', 'restart persistence', 'interrupted shell failure without replay', 'missed deadline'] }, null, 2));
   process.stdout.write(`PASS isolated integration. Artifacts: ${root}\n`);
 } catch (error) {
   await writeFile(join(root, 'server.log'), logs);
