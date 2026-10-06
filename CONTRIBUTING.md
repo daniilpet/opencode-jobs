@@ -12,13 +12,17 @@ Use Node.js 20.19+ and npm, then:
 npm ci --ignore-scripts
 npm test
 npm run check
+npm run check:security-dependencies
 npm run build
 git config core.hooksPath .githooks
 ```
 
 `npm run check` checks JavaScript syntax, not static typing or a comprehensive
-lint rule set. Pre-commit runs tests, syntax checks, and staged whitespace checks.
+lint rule set. Pre-commit runs tests, syntax checks, dependency compatibility
+checks, and staged whitespace checks.
 Do not bypass failing checks or add broad dependency overrides.
+The targeted Seroval/Babel overrides and their compatibility checks are explained
+in [SECURITY.md](SECURITY.md#dependency-security-and-compatibility).
 
 OpenCode/plugin SDK 2.0.22 and OpenTUI 0.5.14 are pinned to the tested host API.
 Solid and its Babel preset are pinned to 1.9.12 to match OpenTUI's peer requirements.
@@ -40,6 +44,11 @@ It tests native shell/monitor, cancellation, permissions, schedules, loops,
 restart recovery, missed deadlines, and actual model-request guidance with full,
 shell-denied, and no-tools roles. The isolated mock verifies prompt delivery and
 permission-filtered recommendations; it does not evaluate real-model tool choice.
+Security scenarios also exercise approval expiry and cancellation before launch,
+bounded native shell termination without the pump, safe status output, dedicated
+worker result delivery, nested-job rejection, and worker interruption without the
+pump. Run the smoke check against a fresh build after runtime changes; a prior
+successful run does not verify later fixes.
 Inspect failed artifacts locally before
 sharing sanitized excerpts. Keep credentials out of the test environment.
 
@@ -54,6 +63,8 @@ discarding or replacing anything. CI builds on Windows/Linux with Node 20.19 and
 - For a bug, add a failing regression test before the fix. Preserve cancellation,
   stable admission IDs, and the no-shell-replay invariant.
 - Update documentation whenever observable behaviour changes.
+- Keep unpublished changes under `Unreleased`; do not describe source-only
+  hardening as shipped in v0.1.0 or applied to existing installations.
 - Use Conventional Commit subjects. Existing comments and tests are Russian;
   do not reformat or translate unrelated files in a functional PR.
 - Disclose substantial AI-assisted work and say how you verified it. Review all

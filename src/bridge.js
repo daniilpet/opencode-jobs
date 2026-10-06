@@ -1,21 +1,64 @@
-import { Service } from '../vendor/client/promise/service.js';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { anchorDirectory } from './paths.js';
 
+async function registration(signal) {
+  try {
+    const file = process.env.OPENCODE_JOBS_SERVICE_FILE ?? join(process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'), 'opencode', 'service.json');
+    const info = JSON.parse(await readFile(file, { encoding: 'utf8', signal }));
+    if (!info || typeof info.url !== 'string' || typeof info.password !== 'string' || !info.password.trim()
+      || !Number.isSafeInteger(info.pid) || info.pid <= 0 || (info.version !== undefined && info.version !== '2.0.22')) throw new Error();
+    if (!/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(info.url)) throw new Error();
+    const url = new URL(info.url);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
+      || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) throw new Error();
+    if (url.hostname === 'localhost') url.hostname = '127.0.0.1';
+    return { url, pid: info.pid, headers: { authorization: `Basic ${Buffer.from(`opencode:${info.password}`).toString('base64')}` } };
+  } catch {
+    throw new Error('Недоступна или некорректна локальная регистрация OpenCode 2.0.22.');
+  }
+}
+
+async function send(url, options) {
+  const response = await fetch(url, { ...options, redirect: 'error' }).catch(() => {
+    throw new Error('Локальный запрос OpenCode прерван или не выполнен.');
+  });
+  if (!response.ok) throw new Error(`OpenCode: HTTP ${response.status}.`);
+  if (response.status === 204) return;
+  return response.json().catch(() => {
+    throw new Error('Некорректный ответ локального сервера OpenCode.');
+  });
+}
+
+// Регистрация | Discovery | API | Результат
+// Неверная | любой | любой | ошибка без сети
+// Верная | несовпадение version/pid, ошибка/auth | любой | ошибка без API
+// Верная | redirect | любой | ошибка без перехода и без API
+// Верная | ready | redirect/ошибка | ошибка без перехода
+// Верная | ready | 2xx | JSON либо undefined для 204
+// Один снимок регистрации; localhost закреплён за 127.0.0.1 без DNS.
 export async function request(path, { method = 'GET', body, directory, signal } = {}) {
-  const endpoint = await Service.discover({ file: process.env.OPENCODE_JOBS_SERVICE_FILE, version: (value) => value === '2.0.22' });
-  if (!endpoint) throw new Error('Локальный сервер OpenCode 2.0.22 недоступен.');
+  if (typeof path !== 'string' || !path.startsWith('/api/') || /[\\#\u0000-\u0020\u007f]/.test(path)) throw new Error('Некорректный путь OpenCode API.');
+  const timeout = AbortSignal.timeout(10000);
+  signal = signal === undefined ? timeout : AbortSignal.any([timeout, signal]);
+  const endpoint = await registration(signal);
   const url = new URL(path, endpoint.url);
-  if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) throw new Error('Планировщик подключается только к loopback-серверу.');
+  if (url.origin !== endpoint.url.origin || !url.pathname.startsWith('/api/')) throw new Error('Некорректный путь OpenCode API.');
+  let info;
+  try {
+    info = await send(new URL('/api/info', endpoint.url), { headers: endpoint.headers, signal });
+  } catch {
+    throw new Error('Локальный сервер OpenCode 2.0.22 недоступен.');
+  }
+  if (!info || info.version !== '2.0.22' || info.pid !== endpoint.pid) throw new Error('Локальный сервер OpenCode 2.0.22 не соответствует регистрации.');
   if (directory) url.searchParams.set('location[directory]', directory);
-  const response = await fetch(url, {
+  return send(url, {
     method,
-    signal: signal ?? AbortSignal.timeout(10000),
-    headers: { ...Service.headers(endpoint), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+    signal,
+    headers: { ...endpoint.headers, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  if (!response.ok) throw new Error(`OpenCode: HTTP ${response.status} при ${method} ${path}.`);
-  if (response.status === 204) return;
-  return response.json();
 }
 
 export async function call(method, input, signal) {

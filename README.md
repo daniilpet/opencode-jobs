@@ -12,6 +12,11 @@ with the terminal UI closed, provided the machine, shared OpenCode server, and
 local scheduler process are running. It does not automatically replay interrupted
 shell commands or silently execute missed prompts late.
 
+**Version scope:** this checkout documents the **Unreleased** security changes,
+including finite job limits and dedicated scheduled-work sessions. They are not
+included in the v0.1.0 release bundle. No security release has been published;
+existing installations have not been updated by these source changes.
+
 ## What you can do
 
 ```text
@@ -62,6 +67,7 @@ cd opencode-jobs
 npm ci --ignore-scripts
 npm test
 npm run check
+npm run check:security-dependencies
 npm run build
 ```
 
@@ -79,8 +85,16 @@ This project is not published to npm.
   exactly-once guarantee for arbitrary model actions or shell side effects.
 - Background commands delegate to OpenCode's native shell executor and its
   permission checks. Cancelling a job cannot undo side effects already performed.
-- A prompt may start later if its session is busy. Loops coalesce ticks while the
-  previous message is still queued. This is not a real-time scheduler.
+- Shell work has finite execution and approval-wait limits. Scheduled model work
+  uses a dedicated snapshot session with a durable deadline; loops also limit
+  admissions. Results wake the original conversation outside the worker budget.
+- Loops coalesce ticks while a previous iteration is queued or executing. Nested
+  jobs, subagents, and native background shell are disabled in worker sessions.
+  This is not a real-time scheduler or an operating-system sandbox. Third-party
+  tools that ignore cancellation are outside the execution-limit guarantee.
+- Legacy unbounded active jobs and old scheduled-prompt deliveries can block
+  loading. Review the [manual update requirements](DEPLOYMENT.md#4-state-and-updates)
+  before replacing an existing installation.
 - Output redaction is best effort. Command output remains untrusted data.
 - Reboot/logout behaviour and visual rendering of the Windows indicator have not
   been validated. Linux indicator rendering and isolated server restart recovery
@@ -92,6 +106,7 @@ This project is not published to npm.
 - [Install, verify, stop](DEPLOYMENT.md)
 - [Commands, recovery, limits, and troubleshooting](docs/operation.md)
 - [Architecture decision](docs/adr/0001-node-local-automation.md)
+- [Finite execution and dedicated sessions](docs/adr/0002-finite-job-execution.md)
 - [Contributing](CONTRIBUTING.md), [code of conduct](CODE_OF_CONDUCT.md),
   [security reports](SECURITY.md), [changelog](CHANGELOG.md)
 - [Issues](https://github.com/daniilpet/opencode-jobs/issues) for bugs and feature requests

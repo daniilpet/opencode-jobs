@@ -2,4 +2,5 @@
 set -eu
 npm test
 npm run check
+npm run check:security-dependencies
 git diff --cached --check

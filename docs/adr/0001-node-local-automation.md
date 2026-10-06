@@ -8,6 +8,12 @@ and interrupted shell commands must never be replayed automatically. OpenCode
 Plugin storage is scoped to plugin ID and the node database, not the location;
 independent writers would corrupt a shared job list.
 
+[ADR 0002](0002-finite-job-execution.md) supersedes the original shared-session
+execution contract for scheduled prompts and adds finite execution boundaries.
+That change is Unreleased and is not in v0.1.0; the behaviour below reflects the
+current source contract. The anchor, supervised pump, durable outbox, and native
+shell delegation remain.
+
 ## 2. Alternatives
 
 1. A legacy monitor plugin and custom fork: incompatible with the installed V2 API.
@@ -39,15 +45,19 @@ anchor stops and drains its predecessor before restoring storage.
 |---|---|---|---|
 | Cancelled/terminal | Any | Any | Do not create a new execution |
 | Active schedule | Future | Any | Wait |
-| Active schedule | Due | Idle | Durable admission and model resume |
-| Active schedule | Due | Busy | Queue; run after earlier work |
+| Active schedule | Due | Original idle/busy | Snapshot into a dedicated bounded session; admit there |
 | Restored schedule | Already passed | Any | Report missed; do not replay prompt |
-| Loop | Due, previous message queued | Busy | Coalesce; no duplicate message |
+| Loop | Due, previous iteration queued/running | Worker busy | Coalesce; no concurrent iteration |
 | Shell recovery | Process available | Any | Continue observation without launch |
 | Shell recovery | Process lost | Any | Report interrupted, outcome may be unknown |
 | Delivery error | Deadline still admissible | Any | Retry admission with the same ID |
 | Delivery error | Too late, ID already admitted | Any | Preserve admission, no replay |
 | Delivery error | Too late, ID not admitted | Any | Replace prompt with missed notification |
+
+Recovery first validates legacy state. Active unbounded jobs and old prompt
+deliveries requiring manual review block loading before these recovery actions.
+No old prompt is automatically transferred to a worker or replayed in its original
+conversation, and the original conversation is never interrupted for migration.
 
 ## 5. Consequences and limits
 

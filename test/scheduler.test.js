@@ -11,6 +11,9 @@ function fixture(initial) {
   const scheduler = new Scheduler({
     load: async () => snapshot,
     save: async (value) => { snapshot = structuredClone(value); },
+    prepareWorker: async (job) => `ses_worker_${job.id}`,
+    observeWorker: async () => ({ status: 'running' }),
+    stopWorker: async () => {},
     deliver: async (value) => {
       if (reject) throw new Error('transport unavailable');
       if (!messages.some((item) => item.id === value.id)) messages.push(value);
@@ -22,14 +25,14 @@ function fixture(initial) {
   return { scheduler, messages, pending, cancelled, saved: () => snapshot, reject: (value) => { reject = value; } };
 }
 
-test('разовый запрос доставляется в исходную сессию ровно один раз', async () => {
+test('разовый запрос доставляется в отдельную сессию ровно один раз', async () => {
   const f = fixture();
   await f.scheduler.load(0);
   const job = await f.scheduler.add('ses_one', { kind: 'schedule', due: 2000, prompt: 'проверь' }, 0);
   await f.scheduler.tick(2000);
   await f.scheduler.tick(3000);
   assert.equal(f.messages.length, 1);
-  assert.equal(f.messages[0].sessionID, 'ses_one');
+  assert.equal(f.messages[0].sessionID, `ses_worker_${job.id}`);
   assert.equal((await f.scheduler.list('ses_one'))[0].id, job.id);
 });
 
@@ -191,12 +194,16 @@ test('отмена удаляет все принятые сообщения м�
 
 test('история не удаляет задания с принятыми ожидающими сообщениями', async () => {
   const f = fixture();
+  const deliver = f.scheduler.io.deliver;
+  f.scheduler.io.deliver = async (entry) => { await deliver(entry); f.pending.add(entry.id); };
   await f.scheduler.load(0);
-  const first = await f.scheduler.add('ses_one', { kind: 'schedule', due: 1, prompt: 'first' }, 0);
+  const first = await f.scheduler.add('ses_one', { kind: 'monitor', command: 'first' }, 0);
+  await f.scheduler.consume('ses_one', first.id, { status: 'completed' }, 'first', 1);
   await f.scheduler.tick(1);
   f.pending.add(f.messages[0].id);
   for (let i = 1; i < 51; i++) {
-    await f.scheduler.add('ses_one', { kind: 'schedule', due: i + 1, prompt: 'next' }, i);
+    const job = await f.scheduler.add('ses_one', { kind: 'monitor', command: 'next' }, i);
+    await f.scheduler.consume('ses_one', job.id, { status: 'completed' }, 'next', i + 1);
     await f.scheduler.tick(i + 1);
     f.pending.add(f.messages.at(-1).id);
   }
@@ -235,11 +242,11 @@ test('ошибка очереди одной сессии не блокируе�
   await f.scheduler.load(0);
   const first = await f.scheduler.add('ses_one', { kind: 'schedule', due: 1, prompt: 'first' }, 0);
   await f.scheduler.tick(1);
-  await f.scheduler.add('ses_two', { kind: 'schedule', due: 2, prompt: 'second' }, 1);
+  const second = await f.scheduler.add('ses_two', { kind: 'schedule', due: 2, prompt: 'second' }, 1);
   await f.scheduler.update('ses_one', first.id, { messages: ['msg_pending'] });
   f.scheduler.io.isPending = async (sessionID) => { if (sessionID === 'ses_one') throw new Error('HTTP 404'); return false; };
   await f.scheduler.tick(2);
-  assert.equal(f.messages.at(-1).sessionID, 'ses_two');
+  assert.equal(f.messages.at(-1).sessionID, `ses_worker_${second.id}`);
 });
 
 test('задержка записи проверяется свежими часами перед admission', async () => {
