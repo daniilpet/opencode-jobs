@@ -1,5 +1,9 @@
 # Using jobs
 
+This guide describes the **Unreleased** source version. Its finite limits,
+dedicated worker sessions, and security hardening are not in the v0.1.0 bundle.
+Existing installations require a separately reviewed manual update.
+
 ## 1. Commands and tools
 
 | Command | Example | Result |
@@ -10,7 +14,7 @@
 | `/schedule` | `/schedule at 2026-10-06T15:00:00+03:00 check the result` | One prompt with an explicit time zone |
 | `/loop` | `/loop 5m check the build status` | Recurring prompts |
 | `/jobs` | `/jobs` | This session's jobs and scheduler health |
-| `/cancel` | `/cancel job_<id>` | Cancel future deliveries and the owned shell process |
+| `/cancel` | `/cancel job_<id>` | Cancel future deliveries and interrupt the owned shell or worker session |
 
 The model-facing tools have names `opencode_jobs_background`,
 `opencode_jobs_monitor`, `opencode_jobs_schedule`, `opencode_jobs_loop`,
@@ -20,11 +24,55 @@ Choose commands for your platform; the plugin does not translate PowerShell to s
 The six slash-command names are registered at the session's location; avoid
 loading another plugin that defines the same names.
 
-Durations accept `s`, `m`, or `h`. The minimum loop interval is 10 seconds.
+Durations accept `s`, `m`, `h`, or `d`, including combinations such as `1h30m`.
+The minimum loop interval is 10 seconds.
 Absolute deadlines must contain a time-zone offset. The schedule horizon is
-30 days. A node allows up to 20 active jobs and 100 undelivered messages.
-Up to 50 terminal history records are kept, except jobs still owning undelivered
-or queued messages. Monitor context and output are bounded.
+30 days. A node allows up to 20 active jobs and 100 outstanding plugin messages,
+counting the union of local outbox IDs and already admitted, still-pending inbox IDs.
+Terminal history is pruned toward 50 records, while undelivered messages,
+unfinished executions, saved results, and pending cleanup protect their owners
+from pruning. Monitor context and output are bounded.
+
+### Finite job limits
+
+| Kind | Default lifetime | Explicit maximum | Run count |
+|---|---|---|---|
+| `background` | 30 minutes | 24 hours | One shell launch |
+| `monitor` | 1 hour | 24 hours | One shell launch |
+| `loop` | 1 hour from creation | 24 hours | 12 admissions by default; maximum 100 |
+| `schedule` | 30 minutes of execution, after waiting for its date | 24 hours of execution; 30-day schedule horizon | One admission |
+
+For model-facing tools, `timeout` is a duration string such as `2h`; `maxRuns`
+is an integer available only for `loop`. The loop interval must be shorter than
+its lifetime. Explicit increases are reserved for work requested by the user.
+The hard ceilings cannot be disabled with zero or raised by tool arguments.
+These are tool input fields, not flags embedded in `raw`. A schedule's execution
+budget starts at its first firing, before worker creation, and includes setup,
+queue waiting, approval waiting, and execution. Its preceding wait for the
+scheduled date is separate.
+
+Shell approval waiting and execution are separate stages, each bounded by the
+configured timeout. An expired approval request cannot subsequently launch work.
+At the first shell attachment, its native start time fixes the stored execution
+deadline. Reattachment and restart never extend it. The native executor enforces
+the execution timeout even without the jobs pump; startup and process termination
+can add overhead, so the deadline is not a hard real-time guarantee.
+
+Loops stop on lifetime or admission count, whichever comes first. The last
+count-limited admission can still be consumed until the lifetime expires.
+Expiry removes still-pending owned messages and interrupts the dedicated job
+session. A local timer and model/tool guards in that session's location enforce
+the deadline independently of the pump. The host's event loop must remain running;
+this is not a hard real-time or operating-system sandbox guarantee. Native model
+requests and foreground shell cancellation are covered; arbitrary third-party
+tools that ignore cancellation are outside that guarantee.
+There is no automatic extension or replacement job after a limit is reached.
+
+If another message would exceed the queue limit, the producing job stops, its
+owned shell or worker is stopped, and its pending deliveries are cancelled. No overflow
+notification is added. `/jobs` retains the reason. A failed cleanup remains
+visible as `stopPending: true` with `untrusted.cleanupError`; subsequent ticks
+retry cleanup only. The original command or prompt is never relaunched.
 
 ### 1.1. Model tool selection
 
@@ -70,20 +118,45 @@ delivery of the guidance, not autonomous tool selection by a real model.
 
 ## 2. Understand delivery
 
-A prompt enters the original session's durable inbox. It does not interrupt the
-current response. A loop coalesces ticks while its previous message remains
-queued; `coalesced` records how many ticks were combined. The indicator and `/jobs`
-refer to the local node only.
+A scheduled prompt runs in a dedicated session created by OpenCode's native fork
+at the first firing. The fork snapshots the original conversation's available
+history, instructions, agent, model, location, and session permission rules.
+Pending inbox entries and incomplete messages are not copied. Later changes in
+the original session do not automatically propagate to this snapshot.
+
+One loop retains the same job session and its iteration history. Ticks coalesce
+while the previous iteration is queued or still executing, or its owned messages
+remain outstanding. The internal `coalesced` counter records combined ticks;
+it is not exposed by the model-facing status projection. The indicator and
+`/jobs` refer to the local node only.
+
+Within the job session, nested subagents, new jobs, and native background-shell
+launches are forbidden. Foreground shell retains native permission checks, with
+its timeout bounded by the remaining job budget. These restrictions do not grant
+permissions or make arbitrary authorized shell code an OS sandbox.
 
 For a schedule, `completed` means the scheduler generated the delivery message.
 `delivery: sent` means OpenCode accepted it; `pending` or `failed` means delivery
-is waiting or failed. Neither status confirms that the model completed the
-requested work. Inspect the session's response for that result.
+is waiting or failed. `workerID` identifies the dedicated session;
+`executionStatus` reports its separately observed execution outcome. Neither an
+admission nor scheduling `completed` proves successful execution.
 
-Cancellation removes future delivery attempts and queued messages still owned by
-the job. It cannot interrupt or undo work from a message already consumed by the
-model, and cannot roll back shell side effects. Native shell completion messages
-are provided by OpenCode; the plugin does not duplicate them.
+A confirmed successful result is redacted, bounded to 8,000 characters, and
+persisted before any required worker stop. An unknown stop acknowledgment cannot
+replace that saved success with a later interruption or expiry: recovery retains
+it across restart and deadline, retries the stop, and then queues the result.
+A stop error on this path appears under `untrusted.observationError`.
+
+The result is delivered to the original session through the durable outbox and
+wakes its model. Processing that notification has its own provider costs and
+belongs to the original conversation, outside the job-session execution budget.
+The full worker history is retained for inspection.
+
+Cancellation removes future delivery attempts and owned queued messages, aborts
+pending shell approval, and interrupts the owned job session or shell process.
+It does not interrupt the original conversation's processing of a result already
+consumed there, or roll back side effects. Native shell completion messages are
+provided by OpenCode; the plugin does not duplicate them.
 
 ## 3. Recovery
 
@@ -97,6 +170,16 @@ stable message ID against the server. An already admitted request is not
 replayed; a request confirmed not admitted is replaced by a failure notification.
 An unavailable transport delays that reconciliation instead of assuming success.
 
+Worker creation records an intent before the fork request. An unknown creation
+outcome is terminal and is not automatically retried. Inspect session history and
+the failure reason before deciding on a replacement job. Deadlines and admission
+counts survive restart; expired or terminal workers are blocked before model
+dispatch, including automatic recovery and compaction. Plugin cleanup attempts
+to interrupt its owned workers before removing their timers and reports failures.
+Timer-based interruption makes
+at most three attempts without the pump and logs failures; this is not an
+unconditional termination guarantee when the host cannot complete cancellation.
+
 After a server restart, an existing shell can continue being observed if its
 original process remains available. A lost shell becomes `interrupted`; the
 model is notified and must decide what to do. Automatic shell replay is forbidden
@@ -107,13 +190,26 @@ Failure messages may also wait in the inbox while the model/provider is
 unavailable. A corrupt storage record is rejected; it is not silently replaced
 with an empty job list. Do not delete the OpenCode database as a recovery step.
 
+Before upgrading, review [legacy state requirements](../DEPLOYMENT.md#4-state-and-updates).
+Active unbounded legacy jobs block loading. Old schedule/loop tracked deliveries
+without a worker and prompt outbox entries not targeting a confirmed worker also
+block loading, even when their job is terminal. No automatic transfer, replay,
+or interruption of the original conversation is performed. Future schedules
+without old deliveries retain their dates.
+Validated schedules record the new execution mode before creating messages, so a
+new failure notification without a worker is not mistaken for a legacy prompt.
+
 ## 4. Security and costs
 
 Native delegation retains OpenCode's shell scanner and permission checks. No
 blanket allow rule is added. Separate before/after hooks for the original `shell`
 tool name are not replayed; hooks for the wrapper still apply.
 
-The bridge uses authenticated shared-service discovery and accepts loopback only.
+The bridge validates one snapshot of the local service registration before any
+network request. It accepts literal loopback addresses, maps `localhost` to
+`127.0.0.1`, verifies server version and PID, rejects redirects, and restricts
+API requests to the same origin. Discovery and response reading share a finite
+10-second timeout, including calls with an external cancellation signal.
 Job ownership is scoped to the originating session in the plugin's tools; this
 does not turn OpenCode into a sandbox for mutually untrusted operating-system users.
 
@@ -121,6 +217,12 @@ Command output is untrusted data, framed with a per-notification marker. ANSI an
 common credential formats are filtered, but arbitrary secrets and personal data
 cannot be reliably detected. Never depend on output redaction to protect secrets.
 Regex evaluation runs in a bounded worker to limit pathological patterns.
+
+The `jobs` and `cancel` tools expose an allowlisted status projection. Commands,
+prompts, raw partial monitor lines, and internal delivery state are excluded.
+Redacted diagnostics and the last three preview lines appear under `untrusted`.
+This projection does not redact OpenCode's database, native shell output, or
+authenticated administrative access to the internal jobs interface.
 
 Scheduled and recurring prompts use the session's configured model. They can
 incur API costs or request additional permissions. Use sensible intervals and

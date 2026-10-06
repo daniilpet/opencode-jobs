@@ -17,8 +17,10 @@
     "./tui": "./dist/tui.js"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --expose-gc --test",
     "check": "node scripts/check.js",
+    "check:security-dependencies": "node scripts/check-security-dependencies.js",
+    "check:bridge-lifetime": "node --always-turbofan --expose-gc --test --test-name-pattern=\"10s timeout API|timeout discovery|ошибка отмены тела\" test/bridge.test.js",
     "build": "node scripts/build.js",
     "package": "node scripts/package-release.js"
   },
@@ -29,6 +31,12 @@
     "@babel/core": "^7.28.0",
     "babel-preset-solid": "1.9.12",
     "solid-js": "1.9.12"
+  },
+  "overrides": {
+    "seroval": "^1.6.8",
+    "@opentui/solid@0.5.14": {
+      "@babel/core": "^7.29.7"
+    }
   },
   "engines": {
     "node": ">=20.19"

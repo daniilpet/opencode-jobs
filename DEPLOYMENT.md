@@ -1,5 +1,9 @@
 # Installation and operations
 
+The finite-lifetime and dedicated-session security changes documented here are
+**Unreleased**. The v0.1.0 archive below is the initial preview and does not contain
+them. No security release or automatic update of existing installations has occurred.
+
 ## 1. Prerequisites
 
 Use the **same user account** for OpenCode and this scheduler. Confirm
@@ -48,7 +52,8 @@ Set-Location .\opencode-jobs-0.1.0
 
 The archive includes `.runtime/package` and `scripts/`. Do not relocate either
 before installation. Source users instead run `npm ci --ignore-scripts`,
-`npm test`, `npm run check`, and `npm run build` from the repository root.
+`npm test`, `npm run check`, `npm run check:security-dependencies`, and
+`npm run build` from the repository root.
 Build-only engine warnings are described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## 3. Install and verify
@@ -102,6 +107,25 @@ installed copies independently of this repository. Automatic in-place upgrades
 are not provided in this preview. Before a manual update, review active jobs,
 back up the existing files, stop the pump, and validate the new version in isolation.
 An OpenCode upgrade requires another compatibility check before normal operation.
+
+The Unreleased finite-lifetime version validates saved state before recovery side
+effects. It refuses to load active legacy `background`, `monitor`, or `loop` jobs
+without valid limits. Finish or deliberately cancel those jobs using the previous
+version before replacing plugin files.
+
+Legacy schedules/loops with tracked deliveries but no confirmed worker, and any
+prompt outbox entry not targeting its confirmed worker, require a separate manual
+review before loading. This includes terminal records with old tracked deliveries.
+The plugin preserves the state and reports affected job IDs; it does not transfer
+or resend those prompts, create replacement workers, or interrupt their original
+conversation. Review the original session's inbox and execution history before
+deciding how to handle old deliveries. Future one-shot schedules without old
+deliveries retain their dates and acquire a finite execution budget when due.
+Other terminal history remains subject to normal retention rules.
+
+If a manual replacement is rejected, restore the saved previous bundle to manage
+the old jobs; do not edit or erase database records to bypass the check. The
+installers continue to refuse overwriting an existing installation.
 
 ## 5. Stop without erasing data
 

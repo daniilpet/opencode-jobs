@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -36,6 +35,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run check
+      - run: npm run check:security-dependencies
+      - run: npm run check:bridge-lifetime
       - run: npm run build
       - run: npm run package
       - name: Install the checked OpenCode host for isolated integration

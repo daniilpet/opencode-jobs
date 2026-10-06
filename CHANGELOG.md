@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Security
+
+- Bound shell approval and execution separately (background 30m, monitor 1h;
+  maximum 24h each); bound loops to 1h/12 admissions by default and 24h/100 maximum.
+- Run schedules and loops in native snapshot workers with durable deadlines,
+  cancellation guards, and no nested jobs, subagents, or native background shell.
+  Schedules retain a 30-day waiting horizon and a separate 30m execution default
+  (24h maximum); parent result processing is outside the worker budget.
+- Reject unbounded active legacy jobs and old scheduled-prompt deliveries requiring
+  manual review before recovery side effects; preserve confirmed bounded worker
+  results across unknown stop acknowledgments, restart, and expiry.
+- Count accepted pending inbox messages toward the queue ceiling, stop saturated
+  producers, restrict model-facing diagnostics, and validate loopback transport
+  with finite waits and no redirects.
+- Update vulnerable source dependencies with targeted Seroval/Babel overrides
+  and add serialization/compiler compatibility checks to local and CI validation.
+
+These changes are not in v0.1.0. No security release has been published and existing
+installations have not been updated. Execution limits are not an OS sandbox or a
+hard real-time guarantee; third-party tools that ignore cancellation are excluded.
+
+### Guidance
+
 - Automatically append tool-selection guidance to the agent-loop system context,
   limited to jobs tools available in each request without replacing instructions
   or changing permissions.

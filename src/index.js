@@ -8,13 +8,17 @@ import { call, request } from './bridge.js';
 import { anchorDirectory } from './paths.js';
 import { sanitize } from './sanitize.js';
 import { addGuidance } from './guidance.js';
+import { jobLimits } from './limits.js';
+import { presentJob } from './presentation.js';
+import { installWorkerGuards } from './worker-guards.js';
+import { createWorkerSessions } from './worker-sessions.js';
 
 const names = ['background', 'monitor', 'loop', 'schedule', 'jobs', 'cancel'];
 const descriptions = {
   background: 'Запустить shell-команду в фоне с проверкой штатных разрешений.',
   monitor: 'Отслеживать совпадения регулярного выражения в выводе shell-команды.',
-  loop: 'Периодически передавать запрос в эту сессию; минимум 10 секунд.',
-  schedule: 'Передать запрос в эту сессию в назначенное время.',
+  loop: 'Периодически выполнять запрос в отдельной сессии задания и возвращать результат сюда; минимум 10 секунд.',
+  schedule: 'В назначенное время выполнить запрос в отдельной сессии задания и вернуть результат сюда.',
   jobs: 'Показать задания текущей сессии и состояние планировщика.',
   cancel: 'Отменить задание текущей сессии.',
 };
@@ -30,6 +34,9 @@ export default {
     let ticks = Promise.resolve();
     const controller = new AbortController();
     const lifetime = controller.signal;
+    const launches = globalThis[Symbol.for('opencode.jobs.launches')] ??= new Map();
+    const workerCleanup = await installWorkerGuards(ctx);
+    const workers = createWorkerSessions(ctx);
     const ownerKey = Symbol.for('opencode.jobs.anchor');
     const owner = { stop: () => { controller.abort(); scheduler?.close(); }, done: () => Promise.all([ticks.catch(() => {}), scheduler?.serial]) };
     const active = () => {
@@ -55,6 +62,20 @@ export default {
         now: Date.now,
         load: () => ctx.storage.get('state'),
         save: (state) => ctx.storage.set('state', state),
+        prepareWorker: workers.prepare,
+        observeWorker: workers.observe,
+        stopWorker: workers.stop,
+        stopLaunch: (job) => {
+          const launch = launches.get(job.id);
+          if (!launch) return;
+          launch.abort(new Error('Задание остановлено до завершения запуска.'));
+          throw new Error('Ожидается подтверждение отмены запуска.');
+        },
+        stopShell: async (job) => {
+          try { await shellRequest(job, '', { method: 'DELETE' }); } catch (error) {
+            if (!String(error.message).includes('HTTP 404')) throw error;
+          }
+        },
         recoverShell: async (job) => {
           try { await shellRequest(job); return true; } catch (error) {
             if (!String(error.message).includes('HTTP 404')) throw error;
@@ -99,7 +120,7 @@ export default {
             text = await monitor.ingest(page.output, Date.now(), ended && cursor >= page.size);
             monitorState = monitor.snapshot();
           }
-          await scheduler.consume(job.sessionID, job.id, { cursor, preview, ...(monitorState ? { monitorState } : {}), ...(ended && cursor >= page.size ? { status: info.exit === 0 ? 'completed' : 'failed', exit: info.exit ?? -1, ended: Date.now() } : {}) }, text, Date.now());
+          await scheduler.consume(job.sessionID, job.id, { cursor, preview, ...(monitorState ? { monitorState } : {}), ...(ended && cursor >= page.size ? { status: info.status === 'timeout' ? 'expired' : info.exit === 0 ? 'completed' : 'failed', exit: info.exit ?? -1, ended: Date.now() } : {}) }, text, Date.now());
         } catch (error) {
           active();
           if (String(error.message).includes('HTTP 404') || /выражени|Worker/.test(error.message)) await scheduler.report(job.sessionID, job.id, sanitize(error.message));
@@ -120,9 +141,10 @@ export default {
       },
       create: async (input) => {
         const session = unwrap(await ctx.session.get({ sessionID: input.sessionID }));
+        if (session.metadata?.opencodeJobsWorker) throw new Error('Сессия задания не может создавать вложенные задания.');
         const config = parse(input.name, input.raw);
         if (!['background', 'monitor', 'loop', 'schedule'].includes(config.kind)) throw new Error('Эта команда не создаёт задания.');
-        const job = await scheduler.add(input.sessionID, config, Date.now(), session.location.directory);
+        const job = await scheduler.add(input.sessionID, { ...config, ...jobLimits(config.kind, input.timeout, input.maxRuns) }, Date.now(), session.location.directory);
         return { job };
       },
       attach: async (input) => {
@@ -131,8 +153,7 @@ export default {
         if (!job) throw new Error('Задание не найдено.');
         const info = await request(`/api/shell/${input.shellID}`, { directory: job.directory });
         if (unwrap(info).metadata.sessionID !== input.sessionID) throw new Error('Shell принадлежит другой сессии.');
-        const attached = await scheduler.update(input.sessionID, input.id, { shellID: input.shellID });
-        if (attached.status === 'cancelled' || attached.status === 'interrupted') await shellRequest(attached, '', { method: 'DELETE' });
+        const attached = await scheduler.attach(input.sessionID, input.id, input.shellID, Date.now(), unwrap(info).time.started);
         return { job: attached };
       },
       fail: async (input) => {
@@ -141,11 +162,10 @@ export default {
       },
       list: async (input) => {
         await ctx.session.get({ sessionID: input.sessionID });
-        return { jobs: await scheduler.list(input.sessionID), lastTick: scheduler.state.lastTick, healthy: Date.now() - scheduler.state.lastTick < 5000, pending: scheduler.state.outbox.length };
+        return { jobs: await scheduler.list(input.sessionID), lastTick: scheduler.state.lastTick, healthy: Date.now() - scheduler.state.lastTick < 5000, pending: scheduler.outstanding() };
       },
       cancel: async (input) => {
         const job = await scheduler.cancel(input.sessionID, input.id);
-        if (job.shellID) await shellRequest(job, '', { method: 'DELETE' });
         return { job };
       },
     };
@@ -162,20 +182,36 @@ export default {
       for (const name of names) editor.add({
         name: `opencode_jobs_${name}`,
         description: `${descriptions[name]} Задания локальны этому узлу. Сроки сохраняются при перезапуске. При сбое исходный запрос не повторяется автоматически; уведомление требует решения модели.`,
-        input: { type: 'object', properties: { raw: { type: 'string', description: 'Исходные аргументы команды; для monitor: --regex <pattern> -- <shell-команда>; schedule: in 5m <запрос>; loop: 5m <запрос>.' } }, ...(name === 'jobs' ? {} : { required: ['raw'] }), additionalProperties: false },
+        input: { type: 'object', properties: { raw: { type: 'string', description: 'Исходные аргументы команды; для monitor: --regex <pattern> -- <shell-команда>; schedule: in 5m <запрос>; loop: 5m <запрос>.' }, ...(['background', 'monitor', 'loop', 'schedule'].includes(name) ? { timeout: { type: 'string', description: 'Конечный срок работы: 30m для background/schedule, 1h для monitor/loop по умолчанию. Максимум 24h, увеличение только для явно запрошенной длительной работы. Ожидание даты schedule учитывается отдельно.' } } : {}), ...(name === 'loop' ? { maxRuns: { type: 'integer', minimum: 1, maximum: 100, description: 'Предельное число срабатываний: по умолчанию 12, максимум 100. Срок и счётчик действуют одновременно.' } } : {}) }, ...(name === 'jobs' ? {} : { required: ['raw'] }), additionalProperties: false },
         options: { codemode: false, ...(['background', 'monitor'].includes(name) ? { permission: 'shell' } : {}) },
         async execute(input, context) {
           const config = parse(name, input.raw ?? '');
-          if (name === 'jobs') return { content: JSON.stringify(await call('list', { sessionID: context.sessionID }, context.signal)) };
-          if (name === 'cancel') return { content: JSON.stringify(await call('cancel', { sessionID: context.sessionID, id: config.id }, context.signal)) };
-          const { job } = await call('create', { sessionID: context.sessionID, name, raw: input.raw }, context.signal);
+          if (name === 'jobs') {
+            const result = await call('list', { sessionID: context.sessionID }, context.signal);
+            return { content: JSON.stringify({ jobs: result.jobs.map(presentJob), lastTick: result.lastTick, healthy: result.healthy, pending: result.pending }) };
+          }
+          if (name === 'cancel') {
+            const result = await call('cancel', { sessionID: context.sessionID, id: config.id }, context.signal);
+            return { content: JSON.stringify({ job: presentJob(result.job) }) };
+          }
+          const { job } = await call('create', { sessionID: context.sessionID, name, raw: input.raw, timeout: input.timeout, maxRuns: input.maxRuns }, context.signal);
           if (['background', 'monitor'].includes(name)) {
             let startedShell;
+            let waitSignal;
+            const launch = new AbortController();
+            launches.set(job.id, launch);
             try {
+              const state = await call('list', { sessionID: context.sessionID }, context.signal);
+              if (!state.jobs.some((item) => item.id === job.id && item.status === 'active')) throw new Error('Задание уже остановлено; запуск запрещён.');
               const native = (await ctx.tool.list()).find((tool) => tool.id === 'shell');
               if (!native) throw new Error('Штатный инструмент shell недоступен; обход разрешений запрещён.');
-              const result = await native.execute({ command: config.command, background: true }, {
+              const remaining = job.launchExpiresAt - Date.now();
+              if (remaining <= 0) throw new Error('Истёк срок ожидания запуска команды.');
+              waitSignal = AbortSignal.any([context.signal, lifetime, launch.signal, AbortSignal.timeout(remaining)]);
+              waitSignal.throwIfAborted();
+              const result = await native.execute({ command: config.command, background: true, timeout: job.timeout }, {
                 ...context,
+                signal: waitSignal,
                 progress: async (metadata) => {
                   if (metadata.shellID) {
                     startedShell = metadata.shellID;
@@ -183,14 +219,17 @@ export default {
                   }
                   await context.progress(metadata);
                 },
-              });
+              }).finally(() => launches.delete(job.id));
               const shellID = result.metadata?.shellID ?? result.output?.shellID;
               if (!shellID) throw new Error('Shell не вернул идентификатор фонового процесса.');
+              startedShell = shellID;
               await call('attach', { sessionID: context.sessionID, id: job.id, shellID }, context.signal);
             } catch (error) {
               if (startedShell) return { content: `Команда уже запущена: ${startedShell}, задание ${job.id}. Регистрация/наблюдение завершились ошибкой: ${sanitize(error.message)}. НЕ повторяйте запуск. Сначала проверьте /jobs и процесс.`, metadata: { jobID: job.id, shellID: startedShell } };
-              await call('fail', { sessionID: context.sessionID, id: job.id, reason: error.message }).catch(() => {});
+              await call('fail', { sessionID: context.sessionID, id: job.id, reason: waitSignal?.reason?.name === 'TimeoutError' ? 'Истёк срок ожидания разрешения на запуск.' : error.message }).catch(() => {});
               throw error;
+            } finally {
+              launches.delete(job.id);
             }
           }
           return { content: `Задание ${job.id} (${name}) создано. Результат придёт в эту сессию автоматически. Не опрашивайте его завершение.`, metadata: { jobID: job.id } };
@@ -207,6 +246,8 @@ export default {
         execute: ({ sessionID, prompt, delivery }) => ctx.session.prompt({ ...prompt, sessionID, delivery, text: `Вызови инструмент opencode_jobs_${name}. Передай raw точно как аргументы ниже; для jobs raw пустой. Верни результат, не выполняй задачу повторно другими инструментами.\n\n${prompt.text}` }),
       });
     });
-    return () => owner.stop();
+    return async () => {
+      try { await workerCleanup(); } finally { owner.stop(); }
+    };
   },
 };

@@ -18,24 +18,41 @@ for (const directory of [config, anchor, workdir]) await mkdir(directory, { recu
 let calls = 0;
 const guidanceRequests = [];
 const guidanceHeader = '## OpenCode jobs: выбор инструментов';
-const agentPrompts = { build: 'Local integration test. Follow the test tool request. Do not use other tools.', noShell: 'Local permissions test.', noTools: 'Local no-tools test.' };
+const agentPrompts = { build: 'Local integration test. Follow the test tool request. Do not use other tools.', noShell: 'Local permissions test.', noTools: 'Local no-tools test.', denyCommand: 'Local command-specific denial test.', askShell: 'Local shell approval test.' };
+const statusOutputs = [];
+const toolExchanges = [];
+const hangingWorkers = [];
 const mock = createServer(async (request, response) => {
   let raw = '';
   for await (const part of request) raw += part;
   const body = JSON.parse(raw || '{}');
   const system = (body.messages ?? []).filter((item) => ['system', 'developer'].includes(item.role)).map((item) => typeof item.content === 'string' ? item.content : (item.content ?? []).map((part) => part.text ?? '').join('\n')).join('\n');
   const users = (body.messages ?? []).filter((item) => item.role === 'user').map((item) => typeof item.content === 'string' ? item.content : (item.content ?? []).map((part) => part.text ?? '').join('\n')).join('\n');
-  const agent = /JOBS_SMOKE_AGENT:(build|noShell|noTools)/.exec(users)?.[1];
+  const agent = /JOBS_SMOKE_AGENT:(build|noShell|noTools|denyCommand|askShell)/.exec(users)?.[1];
   if (agent) guidanceRequests.push({ agent, tools: (body.tools ?? []).map((item) => item.function.name), system, originalPromptPreserved: system.includes(agentPrompts[agent]) });
   const last = body.messages?.at(-1);
   const text = typeof last?.content === 'string' ? last.content : JSON.stringify(last?.content ?? '');
-  const marker = /JOBS_SMOKE_TOOL:(background|monitor)/.exec(text);
+  if (last?.role === 'user' && text.includes('JOBS_SMOKE_WORKER_HANG')) {
+    calls++;
+    const capture = { closed: false };
+    hangingWorkers.push(capture);
+    response.on('close', () => { capture.closed = true; });
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.write(': waiting for the job deadline\n\n');
+    return;
+  }
+  const marker = /JOBS_SMOKE_TOOL:(background|monitor|jobs|cancel)/.exec(text);
   const tool = marker && last.role === 'user' ? body.tools?.find((item) => item.function?.name.endsWith(`opencode_jobs_${marker[1]}`)) : undefined;
-  const nativeCommand = text.includes('CANCEL_LONG') ? (process.platform === 'win32' ? 'Start-Sleep -Seconds 60' : 'sleep 60') : (process.platform === 'win32' ? 'Start-Sleep -Seconds 2; Write-Output OPENCODE_JOBS_SMOKE' : 'sleep 2; echo OPENCODE_JOBS_SMOKE');
-  const argumentsRaw = marker?.[1] === 'monitor' ? `--regex OPENCODE_JOBS_SMOKE --before 0 --after 0 --debounce 1 -- ${nativeCommand}` : nativeCommand;
+  const nativeCommand = text.includes('TIMEOUT_CHILD') ? 'node timeout-child.cjs' : text.includes('PARTIAL_OUTPUT') ? 'node partial-child.cjs' : text.includes('DENIED_COMMAND') ? 'echo JOBS_DENIED_COMMAND' : text.includes('CANCEL_LONG') ? (process.platform === 'win32' ? 'Start-Sleep -Seconds 60' : 'sleep 60') : (process.platform === 'win32' ? 'Start-Sleep -Seconds 2; Write-Output OPENCODE_JOBS_SMOKE' : 'sleep 2; echo OPENCODE_JOBS_SMOKE');
+  const argumentsRaw = marker?.[1] === 'jobs' ? '' : marker?.[1] === 'cancel' ? /CANCEL_ID:(job_[a-f0-9-]+)/.exec(text)?.[1] : marker?.[1] === 'monitor' ? `--regex OPENCODE_JOBS_SMOKE --before 0 --after 0 --debounce 1 -- ${nativeCommand}` : nativeCommand;
+  for (const item of body.messages ?? []) {
+    if (item.role !== 'tool' || typeof item.content !== 'string' || !/"jobs":|"job":/.test(item.content)) continue;
+    if (!statusOutputs.includes(item.content)) statusOutputs.push(item.content);
+  }
   const id = `chatcmpl-${++calls}`;
-  const message = tool ? { role: 'assistant', tool_calls: [{ id: `call-${calls}`, type: 'function', function: { name: tool.function.name, arguments: JSON.stringify({ raw: argumentsRaw }) } }] } : { role: 'assistant', content: 'SMOKE_READY' };
+  const message = tool ? { role: 'assistant', tool_calls: [{ id: `call-${calls}`, type: 'function', function: { name: tool.function.name, arguments: JSON.stringify({ raw: argumentsRaw, ...(text.includes('TIMEOUT_CHILD') ? { timeout: '5s' } : text.includes('WAIT_TIMEOUT') ? { timeout: '2s' } : {}) }) } }] } : { role: 'assistant', content: 'SMOKE_READY' };
   const finish = tool ? 'tool_calls' : 'stop';
+  toolExchanges.push({ last, response: message });
   const usage = { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 };
   if (body.stream) {
     response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -52,7 +69,7 @@ await new Promise((done) => mock.listen(0, '127.0.0.1', done));
 await writeFile(join(config, 'opencode.json'), JSON.stringify({
   model: 'smoke/smoke', plugins: [artifact], update: 'disable',
   providers: { smoke: { package: '@opencode/ai/providers/openai-compatible', env: ['OPENCODE_JOBS_SMOKE_KEY'], settings: { baseURL: `http://127.0.0.1:${mock.address().port}/v1` }, models: { smoke: { name: 'Local smoke', capabilities: { tools: true }, limit: { context: 32768, output: 1024 } } } } },
-  agents: { build: { system: agentPrompts.build, permissions: [{ action: '*', resource: '*', effect: 'allow' }] }, noShell: { system: agentPrompts.noShell, permissions: [{ action: 'shell', resource: '*', effect: 'deny' }] }, noTools: { system: agentPrompts.noTools, permissions: [{ action: '*', resource: '*', effect: 'deny' }] } },
+  agents: { build: { system: agentPrompts.build, permissions: [{ action: '*', resource: '*', effect: 'allow' }] }, noShell: { system: agentPrompts.noShell, permissions: [{ action: 'shell', resource: '*', effect: 'deny' }] }, noTools: { system: agentPrompts.noTools, permissions: [{ action: '*', resource: '*', effect: 'deny' }] }, denyCommand: { system: agentPrompts.denyCommand, permissions: [{ action: '*', resource: '*', effect: 'allow' }, { action: 'shell', resource: '*JOBS_DENIED_COMMAND*', effect: 'deny' }] }, askShell: { system: agentPrompts.askShell, permissions: [{ action: '*', resource: '*', effect: 'allow' }, { action: 'shell', resource: '*', effect: 'ask' }] } },
 }));
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/(?:API_KEY|TOKEN|SECRET|PASSWORD)/i.test(key)));
 Object.assign(env, {
@@ -88,6 +105,8 @@ const api = async (path, method = 'GET', body, directory) => {
 const rpc = async (method, input) => (await api(`/api/rpc/opencode-jobs/${method}`, 'POST', { input }, anchor)).output;
 const data = (value) => value?.data ?? value;
 try {
+  await writeFile(join(workdir, 'timeout-child.cjs'), "process.stdout.write('JOBS_CHILD_PID=' + process.pid + '\\n'); setInterval(() => {}, 1000);\n");
+  await writeFile(join(workdir, 'partial-child.cjs'), "process.stdout.write('token=FIXTURE_PARTIAL_SECRET'); setInterval(() => {}, 1000);\n");
   start();
   endpoint = await until(() => Service.discover({ file: registration }), 'isolated server startup');
   await writeFile(join(root, 'config-discovery.json'), JSON.stringify(await api('/api/config', 'GET', undefined, workdir), null, 2));
@@ -128,19 +147,99 @@ try {
   await until(async () => data(await api(`/api/session/${forbiddenSession.id}/context`)).some((item) => JSON.stringify(item).includes('SMOKE_READY')), 'deny shell session response');
   assert.equal((await rpc('list', { sessionID: forbiddenSession.id })).jobs.length, 0);
   process.stdout.write('PASS shell permission denial\n');
+  const denyCommand = data(await api('/api/session', 'POST', { title: 'OpenCode jobs command-specific denial', location: { directory: workdir }, agent: 'denyCommand', model: { providerID: 'smoke', id: 'smoke' } }));
+  await api(`/api/session/${denyCommand.id}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background DENIED_COMMAND\nJOBS_SMOKE_AGENT:denyCommand' });
+  await until(async () => (await rpc('list', { sessionID: denyCommand.id })).jobs.some((item) => item.status === 'failed'), 'specific command denied through wrapper');
+  assert.ok(!data(await api('/api/shell', 'GET', undefined, workdir)).some((item) => item.metadata.sessionID === denyCommand.id));
+  const askShell = data(await api('/api/session', 'POST', { title: 'OpenCode jobs approval denial', location: { directory: workdir }, agent: 'askShell', model: { providerID: 'smoke', id: 'smoke' } }));
+  await api(`/api/session/${askShell.id}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background CANCEL_LONG\nJOBS_SMOKE_AGENT:askShell' });
+  const permission = await until(async () => data(await api(`/api/session/${askShell.id}/permission`))[0], 'native permission pending');
+  assert.ok(!data(await api('/api/shell', 'GET', undefined, workdir)).some((item) => item.metadata.sessionID === askShell.id));
+  await api(`/api/session/${askShell.id}/permission/${permission.id}/reply`, 'POST', { decision: 'reject' });
+  await until(async () => (await rpc('list', { sessionID: askShell.id })).jobs.some((item) => item.status === 'failed'), 'native permission rejection');
+  assert.ok(!data(await api('/api/shell', 'GET', undefined, workdir)).some((item) => item.metadata.sessionID === askShell.id));
+  process.stdout.write('PASS specific command deny and ask/reject preserve native permission checks\n');
+  const waitTimeout = data(await api('/api/session', 'POST', { title: 'OpenCode jobs approval deadline', location: { directory: workdir }, agent: 'askShell', model: { providerID: 'smoke', id: 'smoke' } }));
+  await api(`/api/session/${waitTimeout.id}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background CANCEL_LONG WAIT_TIMEOUT\nJOBS_SMOKE_AGENT:askShell' });
+  const waiting = await until(async () => data(await api(`/api/session/${waitTimeout.id}/permission`))[0], 'permission with finite waiting deadline');
+  await until(async () => data(await api(`/api/session/${waitTimeout.id}/permission`)).length === 0, 'expired approval removed');
+  await assert.rejects(api(`/api/session/${waitTimeout.id}/permission/${waiting.id}/reply`, 'POST', { decision: 'once' }), /404/);
+  assert.ok(!data(await api('/api/shell', 'GET', undefined, workdir)).some((item) => item.metadata.sessionID === waitTimeout.id));
+  process.stdout.write('PASS approval wait expires and late approval cannot start command\n');
+  const cancelApproval = data(await api('/api/session', 'POST', { title: 'OpenCode jobs cancel pending approval', location: { directory: workdir }, agent: 'askShell', model: { providerID: 'smoke', id: 'smoke' } }));
+  await api(`/api/session/${cancelApproval.id}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background CANCEL_LONG\nJOBS_SMOKE_AGENT:askShell' });
+  const cancelWaiting = await until(async () => data(await api(`/api/session/${cancelApproval.id}/permission`))[0], 'approval before job cancellation');
+  const waitingJob = (await rpc('list', { sessionID: cancelApproval.id })).jobs[0];
+  await rpc('cancel', { sessionID: cancelApproval.id, id: waitingJob.id });
+  await until(async () => data(await api(`/api/session/${cancelApproval.id}/permission`)).length === 0, 'job cancellation removes pending approval');
+  await assert.rejects(api(`/api/session/${cancelApproval.id}/permission/${cancelWaiting.id}/reply`, 'POST', { decision: 'once' }), /404/);
+  assert.ok(!data(await api('/api/shell', 'GET', undefined, workdir)).some((item) => item.metadata.sessionID === cancelApproval.id));
+  await until(async () => (await rpc('list', { sessionID: cancelApproval.id })).jobs.some((item) => item.id === waitingJob.id && !item.stopPending), 'pending launch cleanup acknowledged');
+  process.stdout.write('PASS cancelling pending approval prevents a late launch\n');
   const noToolsSession = data(await api('/api/session', 'POST', { title: 'OpenCode jobs no-tools guidance smoke', location: { directory: workdir }, agent: 'noTools', model: { providerID: 'smoke', id: 'smoke' } }));
   await api(`/api/session/${noToolsSession.id}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background\nJOBS_SMOKE_AGENT:noTools' });
   await until(async () => data(await api(`/api/session/${noToolsSession.id}/context`)).some((item) => JSON.stringify(item).includes('SMOKE_READY')), 'no-tools session response');
   assert.equal((await rpc('list', { sessionID: noToolsSession.id })).jobs.length, 0);
+  await api(`/api/session/${sessionID}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:monitor PARTIAL_OUTPUT\nJOBS_SMOKE_AGENT:build' });
+  const partial = await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.monitorState?.partial?.includes('FIXTURE_PARTIAL_SECRET')), 'raw monitor partial exists only internally');
+  await api(`/api/session/${sessionID}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:jobs\nJOBS_SMOKE_AGENT:build' });
+  await until(() => statusOutputs.some((item) => item.includes('"jobs":')), 'model received safe jobs status');
+  await api(`/api/session/${sessionID}/prompt`, 'POST', { text: `JOBS_SMOKE_TOOL:cancel CANCEL_ID:${partial.id}\nJOBS_SMOKE_AGENT:build` });
+  await until(() => statusOutputs.some((item) => item.includes('"job":')), 'model received safe cancel status');
+  assert.ok(statusOutputs.length >= 2);
+  for (const output of statusOutputs) assert.doesNotMatch(output, /FIXTURE_PARTIAL_SECRET|monitorState|lastMessage|"messages"/);
+  process.stdout.write('PASS model-facing jobs and cancel exclude raw monitor state\n');
+  const stoppedPump = pump;
+  stoppedPump.kill();
+  await new Promise((done) => stoppedPump.once('exit', done));
+  pump = undefined;
+  await api(`/api/session/${sessionID}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background TIMEOUT_CHILD\nJOBS_SMOKE_AGENT:build' });
+  const bounded = await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.timeout === 5000 && item.shellID), 'finite native shell without pump');
+  await until(async () => data(await api(`/api/shell/${bounded.shellID}`, 'GET', undefined, workdir)).status === 'timeout', 'native timeout without pump');
+  const childOutput = data(await api(`/api/shell/${bounded.shellID}/output?cursor=0&limit=16384`, 'GET', undefined, workdir)).output;
+  const childPID = Number(/JOBS_CHILD_PID=(\d+)/.exec(childOutput)?.[1]);
+  assert.ok(childPID > 0, 'actual child process started');
+  await until(() => { try { process.kill(childPID, 0); return false; } catch (error) { if (error.code !== 'ESRCH') throw error; return true; } }, 'native timeout terminates actual child PID');
+  pump = spawn(process.execPath, [join(artifact, 'src', 'pump.js')], { cwd: root, env, stdio: 'ignore', windowsHide: true });
+  await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.id === bounded.id && item.status === 'expired'), 'durable expiry after pump resumes');
+  process.stdout.write('PASS finite shell timeout kills the process without jobs pump\n');
   const scheduled = await rpc('create', { sessionID, name: 'schedule', raw: 'in 2s SMOKE_SCHEDULE' });
   await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.id === scheduled.job.id && item.delivery === 'sent'), 'schedule');
-  const loop = await rpc('create', { sessionID, name: 'loop', raw: '10s SMOKE_LOOP' });
+  const completedSchedule = await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.id === scheduled.job.id && item.executionStatus === 'succeeded'), 'separate schedule execution completed');
+  assert.notEqual(completedSchedule.workerID, sessionID);
+  assert.ok(completedSchedule.workerID.startsWith('ses'));
+  await assert.rejects(rpc('create', { sessionID: completedSchedule.workerID, name: 'loop', raw: '10s NEVER_NESTED' }), /RpcInternalError/);
+  assert.equal((await rpc('list', { sessionID: completedSchedule.workerID })).jobs.length, 0);
+  await until(async () => data(await api(`/api/session/${sessionID}/context`)).some((item) => JSON.stringify(item).includes(completedSchedule.workerID) && JSON.stringify(item).includes('SMOKE_READY')), 'worker result returned to parent');
+  const noPump = pump;
+  noPump.kill();
+  await new Promise((done) => noPump.once('exit', done));
+  pump = undefined;
+  const boundedWorker = await rpc('create', { sessionID, name: 'schedule', raw: 'in 1s JOBS_SMOKE_WORKER_HANG', timeout: '4s' });
+  await until(() => Date.now() >= boundedWorker.job.due, 'worker scheduled deadline');
+  await rpc('tick', {});
+  await until(() => hangingWorkers.length === 1, 'worker model request started without pump');
+  const runningWorker = (await rpc('list', { sessionID })).jobs.find((item) => item.id === boundedWorker.job.id);
+  await api(`/api/session/${sessionID}/prompt`, 'POST', { text: 'PARENT_STILL_INDEPENDENT\nJOBS_SMOKE_AGENT:build' });
+  await until(() => hangingWorkers[0].closed, 'worker timer aborted provider stream without pump');
+  await until(async () => data(await api(`/api/session/${runningWorker.workerID}`)).outcome === 'interrupted', 'worker interrupt acknowledged');
+  assert.notEqual(data(await api(`/api/session/${sessionID}`)).outcome, 'interrupted');
+  await api(`/api/session/${runningWorker.workerID}/prompt`, 'POST', { text: 'JOBS_SMOKE_WORKER_HANG' });
+  await api(`/api/experimental/session/${runningWorker.workerID}/wait`, 'POST', {});
+  assert.equal(hangingWorkers.length, 1, 'terminal worker cannot send another provider request');
+  pump = spawn(process.execPath, [join(artifact, 'src', 'pump.js')], { cwd: root, env, stdio: 'ignore', windowsHide: true });
+  await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.id === boundedWorker.job.id && item.status === 'expired' && !item.stopPending), 'scheduler reconciles expired worker');
+  process.stdout.write('PASS separate worker context, result delivery, nested job denial and independent model deadline\n');
+  const loop = await rpc('create', { sessionID, name: 'loop', raw: '10s SMOKE_LOOP', maxRuns: 1 });
   if (process.platform === 'linux') {
     const terminal = spawn('python3', [resolve('scripts/tui-smoke.py'), binary, sessionID, join(root, 'tui-screen.txt')], { cwd: workdir, env, stdio: 'inherit' });
     const status = await new Promise((done) => terminal.once('exit', done));
     assert.equal(status, 0, 'real TUI indicator');
   }
   await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.id === loop.job.id && item.delivery === 'sent'), 'loop');
+  const limitedLoop = (await rpc('list', { sessionID })).jobs.find((item) => item.id === loop.job.id);
+  assert.equal(limitedLoop.runs, 1);
+  assert.equal(limitedLoop.status, 'completed');
   await rpc('cancel', { sessionID, id: loop.job.id });
   assert.equal((await rpc('list', { sessionID })).jobs.find((item) => item.id === loop.job.id).status, 'cancelled');
   const persisted = await rpc('create', { sessionID, name: 'schedule', raw: 'in 20s SMOKE_PERSISTED' });
@@ -178,10 +277,11 @@ try {
   }
   await writeFile(join(root, 'guidance-report.json'), JSON.stringify({ ok: true, requests: guidanceRequests.map(({ agent, tools, originalPromptPreserved }) => ({ agent, tools: tools.filter((name) => name.startsWith('opencode_jobs_')), originalPromptPreserved, guidanceMatchesTools: true })), limitation: 'Mock provider verifies prompt delivery, not real-model tool selection.' }, null, 2));
   process.stdout.write('PASS native guidance delivery, original role prompts and permission-filtered tools\n');
-  await writeFile(join(root, 'report.json'), JSON.stringify({ ok: true, platform: process.platform, sessionID, mockCalls: calls, checks: ['plugin', 'commands', 'native background', 'native monitor notification', 'native shell cancel', 'cancel-before-attach race', 'shell permission deny', 'guidance delivery and original prompts', 'permission-filtered guidance', 'no-tools guidance omitted', 'schedule', 'loop', 'cancel', 'restart persistence', 'interrupted shell failure without replay', 'missed deadline'] }, null, 2));
+  await writeFile(join(root, 'report.json'), JSON.stringify({ ok: true, platform: process.platform, sessionID, mockCalls: calls, checks: ['plugin', 'commands', 'native background', 'native monitor notification', 'native shell cancel', 'cancel-before-attach race', 'shell permission deny', 'specific-command denial', 'ask/reject without spawn', 'approval deadline and late approval rejection', 'cancel pending approval without spawn', 'safe jobs/cancel output', 'native timeout without pump and actual child termination', 'dedicated worker and parent result delivery', 'nested job denial', 'worker deadline without pump', 'parent independence', 'terminal worker dispatch denial', 'guidance delivery and original prompts', 'permission-filtered guidance', 'no-tools guidance omitted', 'schedule', 'finite loop count', 'cancel', 'restart persistence', 'interrupted shell failure without replay', 'missed deadline'] }, null, 2));
   process.stdout.write(`PASS isolated integration. Artifacts: ${root}\n`);
 } catch (error) {
   await writeFile(join(root, 'server.log'), logs);
+  await writeFile(join(root, 'tool-exchanges.json'), JSON.stringify(toolExchanges, null, 2));
   process.stderr.write(`${error.stack}\nLogs: ${root}\n`);
   process.exitCode = 1;
 } finally {
