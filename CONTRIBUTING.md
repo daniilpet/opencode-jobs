@@ -10,6 +10,7 @@ Use Node.js 20.19+ and npm, then:
 
 ```sh
 npm ci --ignore-scripts
+npm run audit:dependencies
 npm test
 npm run check
 npm run check:security-dependencies
@@ -29,6 +30,14 @@ collection while reading an unfinished response. Include that flag when running
 with forced optimization, which reproduced premature timeout collection on Node 20.
 The targeted Seroval/Babel overrides and their compatibility checks are explained
 in [SECURITY.md](SECURITY.md#dependency-security-and-compatibility).
+
+`npm run audit:dependencies` queries current registry advisories for the complete
+lockfile, including build dependencies, without installing or fixing packages.
+CI runs it before the build matrix and preserves the JSON report even on failure.
+It also runs daily together with CodeQL analysis of JavaScript and Actions.
+Review Code scanning alerts as well as workflow status. See
+[continuous security checks](SECURITY.md#continuous-security-checks) for failure
+policy, report retention, data sent to the registry, and merge-protection limits.
 
 OpenCode/plugin SDK 2.0.22 and OpenTUI 0.5.14 are pinned to the tested host API.
 Solid and its Babel preset are pinned to 1.9.12 to match OpenTUI's peer requirements.

@@ -52,7 +52,7 @@ Set-Location .\opencode-jobs-0.1.0
 
 The archive includes `.runtime/package` and `scripts/`. Do not relocate either
 before installation. Source users instead run `npm ci --ignore-scripts`,
-`npm test`, `npm run check`, `npm run check:security-dependencies`, and
+`npm run audit:dependencies`, `npm test`, `npm run check`, `npm run check:security-dependencies`, and
 `npm run build` from the repository root.
 Build-only engine warnings are described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
