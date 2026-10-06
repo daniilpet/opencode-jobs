@@ -1,8 +1,8 @@
 # Installation and operations
 
-The finite-lifetime and dedicated-session security changes documented here are
-**Unreleased**. The v0.1.0 archive below is the initial preview and does not contain
-them. No security release or automatic update of existing installations has occurred.
+This guide targets **0.2.0 preview**, including finite job limits and dedicated
+scheduled-work sessions. The initial v0.1.0 bundle lacks these changes. Existing
+installations require a separately reviewed manual update as described in section 4.
 
 ## 1. Prerequisites
 
@@ -25,7 +25,7 @@ OpenCode user**, not a different administrator account. S4U scheduled tasks may 
 restricted by organizational policy; do not bypass that policy.
 
 The preview installers support standard user directories only: leave
-`OPENCODE_JOBS_STATE` and `XDG_DATA_HOME` unset during installation and service
+`OPENCODE_JOBS_STATE`, `XDG_DATA_HOME`, and `XDG_CONFIG_HOME` unset during installation and service
 operation. Environment overrides are for manually supervised/testing setups.
 On Linux, the home directory and Node executable path must not contain spaces;
 the generated service does not quote these paths. These are known installer
@@ -38,16 +38,16 @@ On Linux, with both files in the current directory:
 
 ```sh
 sha256sum -c SHA256SUMS
-tar -xzf opencode-jobs-0.1.0.tar.gz
-cd opencode-jobs-0.1.0
+tar -xzf opencode-jobs-0.2.0.tar.gz
+cd opencode-jobs-0.2.0
 ```
 
-On Windows, compare `Get-FileHash .\opencode-jobs-0.1.0.tar.gz -Algorithm SHA256`
+On Windows, compare `Get-FileHash .\opencode-jobs-0.2.0.tar.gz -Algorithm SHA256`
 with the archive's line in `SHA256SUMS`, then:
 
 ```powershell
-tar -xzf .\opencode-jobs-0.1.0.tar.gz
-Set-Location .\opencode-jobs-0.1.0
+tar -xzf .\opencode-jobs-0.2.0.tar.gz
+Set-Location .\opencode-jobs-0.2.0
 ```
 
 The archive includes `.runtime/package` and `scripts/`. Do not relocate either
@@ -87,7 +87,12 @@ If an install fails, inspect the reported error and current state before retryin
 A partially completed install can leave a plugin or service behind; do not treat
 file presence as successful installation, and do not delete it without checking
 for active jobs. `verify-install.js` creates a technical session and two jobs,
-cancels both immediately, and writes `verification.json`; it does not call a model.
+then immediately attempts to cancel them. A completed check writes
+`verification.json`, but does not prove that no model execution occurred.
+If the check is delayed, fails, or is interrupted, jobs can reach their five-minute
+due time and call a model. Inspect the session named
+`OpenCode jobs installation verification` with `/jobs` and cancel any remaining
+jobs before their due time. The script does not provide failure cleanup.
 
 In a normal session, use `/jobs` to check scheduler health and try a harmless
 `/background` command appropriate to your shell. OpenCode can use different shells
@@ -108,7 +113,7 @@ are not provided in this preview. Before a manual update, review active jobs,
 back up the existing files, stop the pump, and validate the new version in isolation.
 An OpenCode upgrade requires another compatibility check before normal operation.
 
-The Unreleased finite-lifetime version validates saved state before recovery side
+Version 0.2.0 validates saved state before recovery side
 effects. It refuses to load active legacy `background`, `monitor`, or `loop` jobs
 without valid limits. Finish or deliberately cancel those jobs using the previous
 version before replacing plugin files.

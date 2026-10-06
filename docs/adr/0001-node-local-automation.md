@@ -10,8 +10,8 @@ independent writers would corrupt a shared job list.
 
 [ADR 0002](0002-finite-job-execution.md) supersedes the original shared-session
 execution contract for scheduled prompts and adds finite execution boundaries.
-That change is Unreleased and is not in v0.1.0; the behaviour below reflects the
-current source contract. The anchor, supervised pump, durable outbox, and native
+That change is included in 0.2.0 preview and is not in v0.1.0; the behaviour below
+reflects the 0.2.0 contract. The anchor, supervised pump, durable outbox, and native
 shell delegation remain.
 
 ## 2. Alternatives

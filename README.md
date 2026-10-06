@@ -12,10 +12,10 @@ with the terminal UI closed, provided the machine, shared OpenCode server, and
 local scheduler process are running. It does not automatically replay interrupted
 shell commands or silently execute missed prompts late.
 
-**Version scope:** this checkout documents the **Unreleased** security changes,
-including finite job limits and dedicated scheduled-work sessions. They are not
-included in the v0.1.0 release bundle. No security release has been published;
-existing installations have not been updated by these source changes.
+**Version scope:** this checkout describes **0.2.0 preview**, including finite job
+limits and dedicated scheduled-work sessions. These changes are absent from the
+v0.1.0 bundle. Existing installations require a separately reviewed manual update;
+installers refuse to overwrite them.
 
 ## What you can do
 

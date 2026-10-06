@@ -2,13 +2,13 @@
 
 ## Supported scope
 
-The 0.1.x preview is tested with OpenCode 2.0.22 on Windows and Linux only.
+The 0.2.0 preview is tested with OpenCode 2.0.22 on Windows and Linux only.
 Compatibility and security of newer hosts or unsupported platforms are not
 claimed. Patches will be handled on a best-effort basis; there is no response SLA.
 
-The hardening described below is **Unreleased** and is not included in v0.1.0.
-No security release has been published. Source dependency overrides and runtime
-changes do not update existing plugin or OpenCode installations.
+The hardening described below is included in the 0.2.0 preview source and bundle;
+it is absent from v0.1.0. Source dependency overrides and runtime changes do not
+automatically update existing plugin or OpenCode installations.
 
 ## Report a vulnerability privately
 

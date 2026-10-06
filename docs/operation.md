@@ -1,6 +1,6 @@
 # Using jobs
 
-This guide describes the **Unreleased** source version. Its finite limits,
+This guide describes **0.2.0 preview**. Its finite limits,
 dedicated worker sessions, and security hardening are not in the v0.1.0 bundle.
 Existing installations require a separately reviewed manual update.
 

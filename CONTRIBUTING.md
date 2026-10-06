@@ -87,8 +87,8 @@ discarding or replacing anything. CI builds on Windows/Linux with Node 20.19 and
 - For a bug, add a failing regression test before the fix. Preserve cancellation,
   stable admission IDs, and the no-shell-replay invariant.
 - Update documentation whenever observable behaviour changes.
-- Keep unpublished changes under `Unreleased`; do not describe source-only
-  hardening as shipped in v0.1.0 or applied to existing installations.
+- Keep unpublished changes under `Unreleased`; do not describe source-only changes
+  as included in published bundles or applied to existing installations.
 - Use Conventional Commit subjects. Existing comments and tests are Russian;
   do not reformat or translate unrelated files in a functional PR.
 - Disclose substantial AI-assisted work and say how you verified it. Review all
