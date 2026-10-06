@@ -55,6 +55,15 @@ Python 3 for the terminal-indicator check.
 
 Smoke uses its own configuration, database, service registration, and loopback
 mock model. It does not submit to a paid model or restart a working OpenCode server.
+Before copying the build or starting a server, it atomically creates a new root.
+By default, each run gets a unique `jobs-smoke-` directory under `%TEMP%/opencode`
+on Windows or `~/.local/share` on Linux. `OPENCODE_JOBS_TEST_ROOT` selects an exact
+path that must not exist, including as an empty directory, file, or symbolic link.
+Missing parent directories are created automatically; concurrent runs with the same
+explicit path allow only one owner. Existing roots are never reused or removed.
+Use a parent directory controlled by your account. New roots restrict group/other
+access on POSIX; Windows access depends on inherited filesystem permissions.
+This does not isolate processes running under the same user account.
 It tests native shell/monitor, cancellation, permissions, schedules, loops,
 restart recovery, missed deadlines, and actual model-request guidance with full,
 shell-denied, and no-tools roles. The isolated mock verifies prompt delivery and
