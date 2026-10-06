@@ -4,6 +4,11 @@
 
 ### Security
 
+- Add a live lockfile advisory gate before builds, including development dependencies,
+  with daily/manual checks and retained reports on success or failure.
+- Analyze JavaScript and GitHub Actions with CodeQL security-extended queries,
+  reporting findings in GitHub Code scanning with job-scoped permissions.
+
 - Bound shell approval and execution separately (background 30m, monitor 1h;
   maximum 24h each); bound loops to 1h/12 admissions by default and 24h/100 maximum.
 - Run schedules and loops in native snapshot workers with durable deadlines,

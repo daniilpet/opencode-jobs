@@ -94,7 +94,7 @@ the full audit and compatibility checks. After `npm ci --ignore-scripts`, run:
 
 ```sh
 npm run check:security-dependencies
-npm audit
+npm run audit:dependencies
 ```
 
 The compatibility check exercises Seroval with the existing web plugins, Solid's
@@ -109,3 +109,43 @@ imports shared Solid/OpenTUI modules supplied by OpenCode. These source override
 do not update an installed host or establish the safety of its dependency tree.
 A clean `npm audit --omit=dev` cannot prove runtime safety. Audit results are a
 snapshot of known advisories and must be checked again when dependencies change.
+
+## Continuous security checks
+
+The `Checks` workflow queries current npm registry advisories for the committed
+lockfile on pull requests, pushes to `main`, manual dispatch, and daily at 05:37 UTC.
+Scheduled runs use the default branch and can be delayed by GitHub. They run the
+security checks without repeating the build/integration matrix.
+
+`npm run audit:dependencies` includes development, optional, and peer dependencies,
+uses the lockfile without installing packages, and fails on every advisory severity,
+including informational findings. Scanner or registry errors also fail the job.
+The build matrix depends on that job succeeding. `npm-audit.json` is retained as
+the `npm-audit` workflow artifact for 30 days, including failed audits that produced
+a report. Runner loss or a hard job timeout can prevent report collection. A missing
+report fails artifact collection. Dependencies are never
+automatically changed by this check.
+
+The npm audit request sends package names and versions to the configured registry;
+it does not send the source code. This check covers the project's locked dependency
+tree, including build tools. It does not inventory an installed OpenCode host or
+discover new vulnerabilities in the plugin's own code. A passing audit reflects
+the registry's known advisories at the time of that run.
+
+CodeQL independently analyzes JavaScript/TypeScript and GitHub Actions workflows
+with the `security-extended` query suite on the same events. These jobs do not build
+or install the project. Results are uploaded to GitHub's **Security / Code scanning**;
+the analysis waits for report processing. Only these jobs receive
+`security-events: write`; audit and build jobs retain read-only repository access.
+The workflow uses `pull_request`, not privileged `pull_request_target` execution.
+
+A successful CodeQL analysis means the scanner and upload completed; it does not
+mean there are no alerts. Review the separate Code scanning results and triage
+findings before merging. Extended queries may produce false positives. Actions
+are pinned to immutable commits; maintainers must review updates to those pins so
+the scanners and query suites do not become stale.
+
+Failing the audit blocks this workflow's build jobs. Enforcing merge restrictions
+also requires branch rules or required status checks configured by a repository
+administrator; this workflow does not create those rules. Daily scans begin only
+after the workflow is present on the default branch.

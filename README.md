@@ -65,6 +65,7 @@ For a source checkout:
 git clone https://github.com/daniilpet/opencode-jobs.git
 cd opencode-jobs
 npm ci --ignore-scripts
+npm run audit:dependencies
 npm test
 npm run check
 npm run check:security-dependencies
