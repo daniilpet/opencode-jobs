@@ -231,18 +231,34 @@ try {
   pump = spawn(process.execPath, [join(artifact, 'src', 'pump.js')], { cwd: root, env, stdio: 'ignore', windowsHide: true });
   await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.id === boundedWorker.job.id && item.status === 'expired' && !item.stopPending), 'scheduler reconciles expired worker');
   process.stdout.write('PASS separate worker context, result delivery, nested job denial and independent model deadline\n');
-  const loop = await rpc('create', { sessionID, name: 'loop', raw: '10s SMOKE_LOOP', maxRuns: 1 });
   if (process.platform === 'linux') {
-    const terminal = spawn('python3', [resolve('scripts/tui-smoke.py'), binary, sessionID, join(root, 'tui-screen.txt')], { cwd: workdir, env, stdio: 'inherit' });
+    await until(async () => Object.keys(data(await api('/api/session/active'))).length === 0, 'idle before TUI');
+    const beforeCalls = calls;
+    const uiSession = data(await api('/api/session', 'POST', { title: 'Jobs TUI smoke', location: { directory: workdir }, agent: 'build', model: { providerID: 'smoke', id: 'smoke' } }));
+    const untouched = await rpc('create', { sessionID: uiSession.id, name: 'schedule', raw: 'in 5m NEVER_RUN_TUI' });
+    await writeFile(join(workdir, 'tui-child.cjs'), "process.stdout.write('NATIVE_TUI_OUTPUT\\n'); setInterval(() => {}, 1000);\n");
+    const uiJob = await rpc('create', { sessionID: uiSession.id, name: 'monitor', raw: '--regex NEVER_MATCH_TUI -- node tui-child.cjs', timeout: '2m' });
+    assert.ok(uiJob.job.created > untouched.job.created, 'selected first row is the newer monitor');
+    const uiShell = data(await api('/api/shell', 'POST', { command: 'node tui-child.cjs', timeout: 120000, metadata: { sessionID: uiSession.id } }, workdir));
+    await rpc('attach', { sessionID: uiSession.id, id: uiJob.job.id, shellID: uiShell.id });
+    const terminal = spawn('python3', [resolve('scripts/tui-smoke.py'), binary, uiSession.id, join(root, 'tui-screen.txt')], { cwd: workdir, env, stdio: 'inherit' });
     const status = await new Promise((done) => terminal.once('exit', done));
-    assert.equal(status, 0, 'real TUI indicator');
+    assert.equal(status, 0, 'real TUI task management');
+    const uiState = await rpc('list', { sessionID: uiSession.id });
+    assert.equal(uiState.jobs.find((item) => item.id === uiJob.job.id).status, 'cancelled');
+    assert.equal(uiState.jobs.find((item) => item.id === untouched.job.id).status, 'active');
+    assert.ok(!data(await api('/api/shell', 'GET', undefined, workdir)).some((item) => item.id === uiShell.id && item.status === 'running'));
+    assert.equal(calls, beforeCalls, 'UI inspection and cancellation must not call a model');
+    await rpc('cancel', { sessionID: uiSession.id, id: untouched.job.id });
   }
+  const loop = await rpc('create', { sessionID, name: 'loop', raw: '10s SMOKE_LOOP', maxRuns: 1 });
   await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.id === loop.job.id && item.delivery === 'sent'), 'loop');
   const limitedLoop = (await rpc('list', { sessionID })).jobs.find((item) => item.id === loop.job.id);
   assert.equal(limitedLoop.runs, 1);
   assert.equal(limitedLoop.status, 'completed');
+  await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.id === loop.job.id && !item.runMessage && item.executionStatus === 'succeeded'), 'loop execution complete');
   await rpc('cancel', { sessionID, id: loop.job.id });
-  assert.equal((await rpc('list', { sessionID })).jobs.find((item) => item.id === loop.job.id).status, 'cancelled');
+  assert.equal((await rpc('list', { sessionID })).jobs.find((item) => item.id === loop.job.id).status, 'completed', 'late cancellation preserves observed completion');
   const persisted = await rpc('create', { sessionID, name: 'schedule', raw: 'in 20s SMOKE_PERSISTED' });
   await api(`/api/session/${sessionID}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background CANCEL_LONG\nJOBS_SMOKE_AGENT:build' });
   const interrupted = await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.kind === 'background' && item.status === 'active' && item.shellID), 'native shell before restart');

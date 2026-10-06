@@ -116,6 +116,51 @@ must not promise unconfirmed execution/delivery or place secrets in commands/pro
 Scheduled prompts can incur provider costs. Mock-provider integration checks prove
 delivery of the guidance, not autonomous tool selection by a real model.
 
+### 1.2. Terminal task management (Unreleased)
+
+The task manager described here is a source change after v0.2.0. Click the bottom
+jobs indicator, select **Задания и мониторы** in the command palette, or choose
+`/joblist` in slash completion. This local command opens the interface directly;
+`/jobs` remains the existing model-facing status command.
+
+The window is scoped to the current session. Active entries include commands,
+monitors, future schedules, repeating jobs, and workers that are still executing
+after scheduling has completed. Use the arrow keys and Enter, or click a row, to
+inspect an entry. Press `h` to switch between active entries and retained history.
+
+The detail view shows the job type, command/prompt, state, scheduled time and
+remaining execution lifetime when available. Captured shell output updates while
+the view is open; it retains at most 32,768 characters from the end of the output.
+Earlier output may be omitted. File-redirected output is not displayed.
+If the host has removed a stopped shell, only the retained short preview is
+available after reopening its details; the window reports the read failure.
+Use the arrow/PageUp/PageDown keys to scroll and End to follow new output. If a job has a
+worker session, press `o` or click **Рабочая сессия** to open its existing transcript.
+
+Press `Ctrl+X` or click **Остановить** to stop the selected job. This invokes the
+existing cancellation operation directly, without asking a model. Stopping a loop
+also cancels future iterations. An already-produced loop result remains queued for
+delivery to the parent session when the user cancels the loop.
+**Останавливается** means cleanup is still pending; it does not claim that the
+process has already stopped. A confirmed worker result
+awaiting finalization is shown as **Завершается** and cannot be discarded by Stop.
+Once finalization completes, a repeating job can be stopped normally.
+
+If completion was already observed by the scheduler, a late cancellation preserves
+the result. Physical process exit and the scheduler's observation are not atomic:
+the ordering of those observations determines the outcome of a close race.
+
+Press `r` to refresh, Backspace to return from details to the list, and Escape to
+close the window. Opening, reading, and stopping jobs do not submit prompts.
+Normal job execution and its result notifications retain their documented model
+costs. Switching sessions closes the window; late responses cannot populate the
+new session's display.
+
+When the pump is unavailable but the server responds, the window warns and still
+allows direct cancellation. On loss of the server connection, retained information
+is marked stale and Stop is disabled until a successful refresh. An unconfirmed
+cancellation displays an error; inspect refreshed state before trying again.
+
 ## 2. Understand delivery
 
 A scheduled prompt runs in a dedicated session created by OpenCode's native fork
@@ -157,6 +202,14 @@ pending shell approval, and interrupts the owned job session or shell process.
 It does not interrupt the original conversation's processing of a result already
 consumed there, or roll back side effects. Native shell completion messages are
 provided by OpenCode; the plugin does not duplicate them.
+
+In the unreleased task-manager implementation, late cancellation preserves a
+terminal outcome already observed by the scheduler. Cancelling a modern worker
+loop also retains its produced result in the outbox and accepted notifications
+to the parent session while removing pending worker prompts. The stored format
+does not distinguish the types of already-accepted parent notifications, so those
+notifications are retained together. Deadline and queue-overflow cleanup retain
+their existing cancellation policy. See [ADR 0003](adr/0003-session-task-management.md).
 
 ## 3. Recovery
 

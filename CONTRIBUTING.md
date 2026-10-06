@@ -6,12 +6,13 @@ promised response time or commercial support agreement.
 
 ## Development setup
 
-Use Node.js 20.19+ and npm, then:
+Use Node.js 20.19+, npm, and Bun 1.3.14 for the checked terminal-rendering baseline, then:
 
 ```sh
 npm ci --ignore-scripts
 npm run audit:dependencies
 npm test
+npm run test:tui
 npm run check
 npm run check:security-dependencies
 npm run check:bridge-lifetime
@@ -21,7 +22,7 @@ git config core.hooksPath .githooks
 
 `npm run check` checks JavaScript syntax, not static typing or a comprehensive
 lint rule set. Pre-commit runs tests, syntax checks, dependency compatibility
-checks, optimized transport lifetime regressions, and staged whitespace checks.
+checks, optimized transport lifetime regressions, terminal-rendering tests, and staged whitespace checks.
 Do not bypass failing checks or add broad dependency overrides.
 `npm test` enables `--expose-gc`: transport timeout regressions force garbage
 collection while reading an unfinished response. Include that flag when running
@@ -51,7 +52,9 @@ OpenTUI or undici. Changes to these pins need new compatibility checks.
 With an installed OpenCode 2.0.22, run `node scripts/smoke.js` after the build.
 Set `OPENCODE_JOBS_CLI` to the **actual executable** if it is installed elsewhere;
 on Windows this must be the native `.exe`, not an npm `.cmd` shim. Linux needs
-Python 3 for the terminal-indicator check.
+Python 3 for the real terminal task-management check. `npm run test:tui` runs
+OpenTUI rendering and interaction tests on Windows and Linux under Bun. These
+component checks do not replace the Linux PTY check in the actual OpenCode host.
 
 Smoke uses its own configuration, database, service registration, and loopback
 mock model. It does not submit to a paid model or restart a working OpenCode server.
