@@ -28,6 +28,12 @@ The model can also call the six `opencode_jobs_*` tools. A small terminal indica
 shows the scheduler's status. Each machine has its own jobs; no shared coordinator
 or extra HTTP server is installed.
 
+The plugin adds [tool-selection guidance](docs/operation.md#11-model-tool-selection)
+to the model's working system context: prefer background jobs for long commands,
+monitor meaningful output events, and schedule only requested future work. Guidance
+includes only jobs tools available in that request and preserves existing instructions
+and permissions. It is advice, not a guarantee of model behaviour or scheduler health.
+
 Scheduled prompts and notifications can wake your configured model and incur
 provider costs. Review permissions and intervals before leaving recurring jobs
 unattended. Never place secrets in command arguments or prompts.

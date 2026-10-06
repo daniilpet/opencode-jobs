@@ -7,6 +7,7 @@ import { parse } from './parser.js';
 import { call, request } from './bridge.js';
 import { anchorDirectory } from './paths.js';
 import { sanitize } from './sanitize.js';
+import { addGuidance } from './guidance.js';
 
 const names = ['background', 'monitor', 'loop', 'schedule', 'jobs', 'cancel'];
 const descriptions = {
@@ -196,6 +197,8 @@ export default {
         },
       });
     });
+
+    await ctx.session.hook('context', addGuidance);
 
     await ctx.command.transform((editor) => {
       for (const name of names) editor.add({

@@ -26,6 +26,48 @@ Absolute deadlines must contain a time-zone offset. The schedule horizon is
 Up to 50 terminal history records are kept, except jobs still owning undelivered
 or queued messages. Monitor context and output are bounded.
 
+### 1.1. Model tool selection
+
+The canonical guidance is in `src/guidance.js`. The plugin registers OpenCode
+2.0.22's `session.hook('context', ...)` to append a text system part before each
+agent-loop request, including tool-driven continuations. It preserves existing
+system parts, role, messages, tools, permissions, and generation options. It does
+not change persisted history, title generation, compaction, or transient generation.
+No separately maintained ForgeFlow prompt is required.
+
+Guidance is built from the request's tool snapshot, not the unfiltered registry.
+If no jobs tools are available, nothing is added. With a subset, only its selection
+rules appear. An identical block already present is not appended again. For example,
+a role denying shell gets no background/monitor recommendation. Later plugins can
+edit the request; the model must still use only the final tools and obey permissions.
+
+The guidance asks the model to:
+
+- Prefer `background` for long permitted tests, builds, downloads, or other shell
+  work; keep short commands and reads on ordinary tools.
+- Use `monitor` for a concrete output event. For a numeric condition such as
+  `value < 0.5`, an authorized script performs the comparison and prints a marker
+  when the condition holds; `monitor` matches that marker. It does not evaluate
+  numeric expressions or conditional operators itself. Define when observation ends.
+- Use `schedule` for an explicitly requested future prompt, with a known time and
+  time zone where applicable. Use `loop` only for requested periodic model work,
+  with a clear interval and stopping condition. Frequent technical checks can run
+  inside a script without calling a model for every sample.
+- Report the real job ID, continue independent authorized work, or finish the
+  response while waiting for automatic notification. Do not wait through sleep
+  commands or repeatedly poll completion.
+- Use `jobs` for requested status, diagnostics, and context recovery. Use `cancel`
+  to stop a session-owned job when requested or when the agreed observation ends.
+- After an error or ambiguous response, establish whether the job/process already
+  exists and what it did before deciding on another attempt. Do not launch the same
+  command again through a fallback tool.
+
+These instructions do not grant permissions, add blanket allow rules, or create
+jobs on their own. Tool availability does not prove the pump is healthy. The model
+must not promise unconfirmed execution/delivery or place secrets in commands/prompts.
+Scheduled prompts can incur provider costs. Mock-provider integration checks prove
+delivery of the guidance, not autonomous tool selection by a real model.
+
 ## 2. Understand delivery
 
 A prompt enters the original session's durable inbox. It does not interrupt the

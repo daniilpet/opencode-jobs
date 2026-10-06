@@ -37,7 +37,10 @@ Python 3 for the terminal-indicator check.
 Smoke uses its own configuration, database, service registration, and loopback
 mock model. It does not submit to a paid model or restart a working OpenCode server.
 It tests native shell/monitor, cancellation, permissions, schedules, loops,
-restart recovery, and missed deadlines. Inspect failed artifacts locally before
+restart recovery, missed deadlines, and actual model-request guidance with full,
+shell-denied, and no-tools roles. The isolated mock verifies prompt delivery and
+permission-filtered recommendations; it does not evaluate real-model tool choice.
+Inspect failed artifacts locally before
 sharing sanitized excerpts. Keep credentials out of the test environment.
 
 `npm run package` creates the release bundle and checksum file after a successful
