@@ -1,33 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import test from 'node:test';
-import plugin from '../src/index.js';
+import { addGuidance as apply } from '../src/guidance.js';
 
 const header = '## OpenCode jobs: выбор инструментов';
 const tool = { description: 'test tool', input: { type: 'object' } };
-let hook;
-
-test.before(async () => {
-  const parent = process.platform === 'win32' ? join(tmpdir(), 'opencode') : tmpdir();
-  await mkdir(parent, { recursive: true });
-  const root = await mkdtemp(join(parent, 'jobs-guidance-test-'));
-  const previous = process.env.OPENCODE_JOBS_STATE;
-  process.env.OPENCODE_JOBS_STATE = join(root, 'state');
-  try {
-    await plugin.setup({
-      location: { directory: join(root, 'work') },
-      rpc: { register: async () => {} },
-      tool: { transform: async (edit) => edit({ add: () => {} }) },
-      command: { transform: async (edit) => edit({ add: () => {} }) },
-      session: { hook: async (name, callback) => { assert.equal(name, 'context'); hook = callback; } },
-    });
-  } finally {
-    if (previous === undefined) delete process.env.OPENCODE_JOBS_STATE;
-    else process.env.OPENCODE_JOBS_STATE = previous;
-  }
-});
 
 function context(tools = {}) {
   return {
@@ -35,11 +11,6 @@ function context(tools = {}) {
     system: [{ type: 'text', text: 'Preserve the original role and instructions.', options: { test: 'keep' } }],
     tools, messages: [{ role: 'user', content: 'Run the permitted check.' }], options: { temperature: 0.2 },
   };
-}
-
-function apply(event) {
-  assert.equal(typeof hook, 'function', 'плагин должен зарегистрировать context hook');
-  hook(event);
 }
 
 test('полный набор jobs получает один блок с конкретными правилами выбора', () => {
