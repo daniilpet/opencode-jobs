@@ -3,4 +3,5 @@ set -eu
 npm test
 npm run check
 npm run check:security-dependencies
+npm run check:bridge-lifetime
 git diff --cached --check

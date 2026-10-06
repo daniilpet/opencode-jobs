@@ -58,6 +58,13 @@ maintainer and keep affected users' data out of the report.
 - Registration is validated before authenticated discovery. Requests remain on
   the validated loopback origin, redirects are forbidden, and transport waits
   are finite even when a caller supplies a cancellation signal.
+  Redirect responses are handled manually and rejected without following
+  `Location`; their unread bodies are cancelled. This preserves response-body
+  cancellation on the tested Node runtimes despite
+  [Undici #4627](https://github.com/nodejs/undici/issues/4627).
+  An explicit timer retains the abort controller through response consumption and
+  is released in `finally`. Error-body cancellation preserves only the HTTP status,
+  including when the underlying stream rejects with a caller's private reason.
 
 ## Dependency security and compatibility
 

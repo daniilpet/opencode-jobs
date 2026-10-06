@@ -21,10 +21,15 @@ async function registration(signal) {
 }
 
 async function send(url, options) {
-  const response = await fetch(url, { ...options, redirect: 'error' }).catch(() => {
+  // manual не следует Location и сохраняет отмену body в Undici 6.21.1 (#4627).
+  const response = await fetch(url, { ...options, redirect: 'manual' }).catch(() => {
     throw new Error('Локальный запрос OpenCode прерван или не выполнен.');
   });
-  if (!response.ok) throw new Error(`OpenCode: HTTP ${response.status}.`);
+  if (!response.ok) {
+    const error = new Error(`OpenCode: HTTP ${response.status}.`);
+    await response.body?.cancel().catch(() => { throw error; });
+    throw error;
+  }
   if (response.status === 204) return;
   return response.json().catch(() => {
     throw new Error('Некорректный ответ локального сервера OpenCode.');
@@ -40,25 +45,31 @@ async function send(url, options) {
 // Один снимок регистрации; localhost закреплён за 127.0.0.1 без DNS.
 export async function request(path, { method = 'GET', body, directory, signal } = {}) {
   if (typeof path !== 'string' || !path.startsWith('/api/') || /[\\#\u0000-\u0020\u007f]/.test(path)) throw new Error('Некорректный путь OpenCode API.');
-  const timeout = AbortSignal.timeout(10000);
-  signal = signal === undefined ? timeout : AbortSignal.any([timeout, signal]);
-  const endpoint = await registration(signal);
-  const url = new URL(path, endpoint.url);
-  if (url.origin !== endpoint.url.origin || !url.pathname.startsWith('/api/')) throw new Error('Некорректный путь OpenCode API.');
-  let info;
+  const controller = new AbortController();
+  // Таймер удерживает controller до полного чтения body, в том числе после GC.
+  const timer = setTimeout(() => controller.abort(), 10000);
   try {
-    info = await send(new URL('/api/info', endpoint.url), { headers: endpoint.headers, signal });
-  } catch {
-    throw new Error('Локальный сервер OpenCode 2.0.22 недоступен.');
+    signal = signal === undefined ? controller.signal : AbortSignal.any([controller.signal, signal]);
+    const endpoint = await registration(signal);
+    const url = new URL(path, endpoint.url);
+    if (url.origin !== endpoint.url.origin || !url.pathname.startsWith('/api/')) throw new Error('Некорректный путь OpenCode API.');
+    let info;
+    try {
+      info = await send(new URL('/api/info', endpoint.url), { headers: endpoint.headers, signal });
+    } catch {
+      throw new Error('Локальный сервер OpenCode 2.0.22 недоступен.');
+    }
+    if (!info || info.version !== '2.0.22' || info.pid !== endpoint.pid) throw new Error('Локальный сервер OpenCode 2.0.22 не соответствует регистрации.');
+    if (directory) url.searchParams.set('location[directory]', directory);
+    return await send(url, {
+      method,
+      signal,
+      headers: { ...endpoint.headers, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  } finally {
+    clearTimeout(timer);
   }
-  if (!info || info.version !== '2.0.22' || info.pid !== endpoint.pid) throw new Error('Локальный сервер OpenCode 2.0.22 не соответствует регистрации.');
-  if (directory) url.searchParams.set('location[directory]', directory);
-  return send(url, {
-    method,
-    signal,
-    headers: { ...endpoint.headers, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
 }
 
 export async function call(method, input, signal) {

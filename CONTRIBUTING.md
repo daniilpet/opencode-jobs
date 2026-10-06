@@ -13,14 +13,20 @@ npm ci --ignore-scripts
 npm test
 npm run check
 npm run check:security-dependencies
+npm run check:bridge-lifetime
 npm run build
 git config core.hooksPath .githooks
 ```
 
 `npm run check` checks JavaScript syntax, not static typing or a comprehensive
 lint rule set. Pre-commit runs tests, syntax checks, dependency compatibility
-checks, and staged whitespace checks.
+checks, optimized transport lifetime regressions, and staged whitespace checks.
 Do not bypass failing checks or add broad dependency overrides.
+`npm test` enables `--expose-gc`: transport timeout regressions force garbage
+collection while reading an unfinished response. Include that flag when running
+`test/bridge.test.js` directly; its deadlines must survive collection on Node 20/22.
+`npm run check:bridge-lifetime` repeats the timeout and cancellation regressions
+with forced optimization, which reproduced premature timeout collection on Node 20.
 The targeted Seroval/Babel overrides and their compatibility checks are explained
 in [SECURITY.md](SECURITY.md#dependency-security-and-compatibility).
 

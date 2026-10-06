@@ -17,9 +17,10 @@
     "./tui": "./dist/tui.js"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --expose-gc --test",
     "check": "node scripts/check.js",
     "check:security-dependencies": "node scripts/check-security-dependencies.js",
+    "check:bridge-lifetime": "node --always-turbofan --expose-gc --test --test-name-pattern=\"10s timeout API|timeout discovery|ошибка отмены тела\" test/bridge.test.js",
     "build": "node scripts/build.js",
     "package": "node scripts/package-release.js"
   },

@@ -68,6 +68,22 @@ test('POST redirect не передаёт тело другому серверу
   assert.ok(result instanceof Error);
 });
 
+test('отклонённый redirect закрывает незавершённое тело без запроса к адресату', { timeout: 2000 }, async (t) => {
+  const target = await server(t, (_req, res) => json(res, { output: 'leaked' }));
+  let closed;
+  const connectionClosed = new Promise((resolve) => { closed = resolve; });
+  const source = await server(t, (req, res) => {
+    if (req.url === '/api/info') return json(res, info);
+    res.once('close', closed);
+    res.writeHead(307, { location: `${target.url}/capture` });
+    res.write('unfinished');
+  });
+  await registration(t, { url: source.url });
+  await assert.rejects(request('/api/example'));
+  await connectionClosed;
+  assert.equal(target.received.length, 0);
+});
+
 for (const [name, values] of [
   ['схема file', { url: 'file:///api/info' }],
   ['схема ftp', { url: 'ftp://127.0.0.1' }],
@@ -251,19 +267,44 @@ test('отмена API прерывает чтение незавершённо�
 });
 
 test('внешний неотменённый signal не отключает 10s timeout API', { timeout: 15000 }, async (t) => {
+  const collection = setInterval(global.gc, 200);
+  t.after(() => clearInterval(collection));
   const source = await server(t, (req, res) => {
     if (req.url === '/api/info') return json(res, info);
     res.writeHead(200, { 'content-type': 'application/json' });
     res.write('{');
   });
   await registration(t, { url: source.url });
+  const started = performance.now();
   await assert.rejects(request('/api/example', { signal: new AbortController().signal }));
+  assert.ok(performance.now() - started >= 9000, 'запрос должен завершиться по дедлайну, без преждевременной ошибки');
   assert.equal(source.received.length, 2);
 });
 
 test('внешний неотменённый signal не отключает timeout discovery', { timeout: 15000 }, async (t) => {
+  const collection = setInterval(global.gc, 200);
+  t.after(() => clearInterval(collection));
   const source = await server(t, () => {});
   await registration(t, { url: source.url });
+  const started = performance.now();
   await assert.rejects(request('/api/example', { signal: new AbortController().signal }));
+  assert.ok(performance.now() - started >= 9000, 'discovery должен завершиться по дедлайну, без преждевременной ошибки');
   assert.deepEqual(source.received.map((entry) => entry.url), ['/api/info']);
+});
+
+test('ошибка отмены тела HTTP404 сохраняет безопасный статус без исходной причины', async (t) => {
+  const controller = new AbortController();
+  const source = await server(t, (req, res) => {
+    if (req.url === '/api/info') return json(res, info);
+    res.writeHead(404);
+    res.write('unfinished');
+  });
+  await registration(t, { url: source.url });
+  const nativeFetch = global.fetch;
+  t.mock.method(global, 'fetch', async (...args) => {
+    const response = await nativeFetch(...args);
+    if (response.status === 404) controller.abort(new Error('synthetic-private-cancel-reason'));
+    return response;
+  });
+  await assert.rejects(request('/api/example', { signal: controller.signal }), { message: 'OpenCode: HTTP 404.' });
 });
