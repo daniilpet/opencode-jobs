@@ -1,6 +1,6 @@
 # Using jobs
 
-This guide describes **0.2.0 preview**. Its finite limits,
+This guide describes **0.3.0 preview**, adding terminal task management. Its finite limits,
 dedicated worker sessions, and security hardening are not in the v0.1.0 bundle.
 Existing installations require a separately reviewed manual update.
 
@@ -116,9 +116,9 @@ must not promise unconfirmed execution/delivery or place secrets in commands/pro
 Scheduled prompts can incur provider costs. Mock-provider integration checks prove
 delivery of the guidance, not autonomous tool selection by a real model.
 
-### 1.2. Terminal task management (Unreleased)
+### 1.2. Terminal task management
 
-The task manager described here is a source change after v0.2.0. Click the bottom
+The task manager is included starting with v0.3.0. Click the bottom
 jobs indicator, select **Задания и мониторы** in the command palette, or choose
 `/joblist` in slash completion. This local command opens the interface directly;
 `/jobs` remains the existing model-facing status command.
@@ -203,7 +203,7 @@ It does not interrupt the original conversation's processing of a result already
 consumed there, or roll back side effects. Native shell completion messages are
 provided by OpenCode; the plugin does not duplicate them.
 
-In the unreleased task-manager implementation, late cancellation preserves a
+Starting with v0.3.0, late cancellation preserves a
 terminal outcome already observed by the scheduler. Cancelling a modern worker
 loop also retains its produced result in the outbox and accepted notifications
 to the parent session while removing pending worker prompts. The stored format

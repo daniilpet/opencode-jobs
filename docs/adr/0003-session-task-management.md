@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted by the owner for implementation; unreleased.
+Accepted; implementation is included in **0.3.0 preview**.
 
 ## Context
 

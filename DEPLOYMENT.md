@@ -1,7 +1,7 @@
 # Installation and operations
 
-This guide targets **0.2.0 preview**, including finite job limits and dedicated
-scheduled-work sessions. The initial v0.1.0 bundle lacks these changes. Existing
+This guide targets **0.3.0 preview**, including terminal task management, finite job
+limits and dedicated scheduled-work sessions. Existing
 installations require a separately reviewed manual update as described in section 4.
 
 ## 1. Prerequisites
@@ -38,16 +38,16 @@ On Linux, with both files in the current directory:
 
 ```sh
 sha256sum -c SHA256SUMS
-tar -xzf opencode-jobs-0.2.0.tar.gz
-cd opencode-jobs-0.2.0
+tar -xzf opencode-jobs-0.3.0.tar.gz
+cd opencode-jobs-0.3.0
 ```
 
-On Windows, compare `Get-FileHash .\opencode-jobs-0.2.0.tar.gz -Algorithm SHA256`
+On Windows, compare `Get-FileHash .\opencode-jobs-0.3.0.tar.gz -Algorithm SHA256`
 with the archive's line in `SHA256SUMS`, then:
 
 ```powershell
-tar -xzf .\opencode-jobs-0.2.0.tar.gz
-Set-Location .\opencode-jobs-0.2.0
+tar -xzf .\opencode-jobs-0.3.0.tar.gz
+Set-Location .\opencode-jobs-0.3.0
 ```
 
 The archive includes `.runtime/package` and `scripts/`. Do not relocate either
@@ -113,7 +113,7 @@ are not provided in this preview. Before a manual update, review active jobs,
 back up the existing files, stop the pump, and validate the new version in isolation.
 An OpenCode upgrade requires another compatibility check before normal operation.
 
-Version 0.2.0 validates saved state before recovery side
+Versions 0.2.0 and later validate saved state before recovery side
 effects. It refuses to load active legacy `background`, `monitor`, or `loop` jobs
 without valid limits. Finish or deliberately cancel those jobs using the previous
 version before replacing plugin files.

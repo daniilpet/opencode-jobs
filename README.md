@@ -12,9 +12,9 @@ with the terminal UI closed, provided the machine, shared OpenCode server, and
 local scheduler process are running. It does not automatically replay interrupted
 shell commands or silently execute missed prompts late.
 
-**Version scope:** this checkout describes **0.2.0 preview**, including finite job
-limits and dedicated scheduled-work sessions. These changes are absent from the
-v0.1.0 bundle. Existing installations require a separately reviewed manual update;
+**Version scope:** this checkout describes **0.3.0 preview**, including terminal
+task management, finite job limits and dedicated scheduled-work sessions. Task
+management is new since v0.2.0. Existing installations require a reviewed manual update;
 installers refuse to overwrite them.
 
 ## What you can do
@@ -33,11 +33,11 @@ The model can also call the six `opencode_jobs_*` tools. A small terminal indica
 shows the scheduler's status. Each machine has its own jobs; no shared coordinator
 or extra HTTP server is installed.
 
-**Unreleased interface:** click the bottom jobs indicator or use `/joblist` to open
+**Task management:** click the bottom jobs indicator or use `/joblist` to open
 the current session's task manager. Inspect active jobs and history, read captured
 command output, open a worker session, or stop a selected job directly without a
-model request. This interface is not included in the published v0.2.0 bundle.
-See [task management](docs/operation.md#12-terminal-task-management-unreleased).
+model request. This interface is included in the v0.3.0 bundle.
+See [task management](docs/operation.md#12-terminal-task-management).
 
 The plugin adds [tool-selection guidance](docs/operation.md#11-model-tool-selection)
 to the model's working system context: prefer background jobs for long commands,
@@ -103,9 +103,9 @@ This project is not published to npm.
   loading. Review the [manual update requirements](DEPLOYMENT.md#4-state-and-updates)
   before replacing an existing installation.
 - Output redaction is best effort. Command output remains untrusted data.
-- Reboot/logout behaviour and visual rendering of the Windows indicator have not
-  been validated. Linux indicator rendering and isolated server restart recovery
-  have been tested. Runtime messages and source comments are currently Russian;
+- Reboot/logout behaviour and real Windows Terminal rendering have not been
+  validated. Windows/Linux component rendering, real Linux terminal task management
+  and isolated server restart recovery have been tested. Runtime messages are Russian;
   command syntax and public documentation are English.
 
 ## Documentation and participation
