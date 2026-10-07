@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 - task management preview
+
 - Open task management from the bottom indicator, command palette, or local
   `/joblist`: current-session active jobs and history, captured shell output,
   worker-session navigation, and direct cancellation without a model request.
