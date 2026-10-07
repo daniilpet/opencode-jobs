@@ -114,6 +114,7 @@ This project is not published to npm.
 - [Commands, recovery, limits, and troubleshooting](docs/operation.md)
 - [Architecture decision](docs/adr/0001-node-local-automation.md)
 - [Finite execution and dedicated sessions](docs/adr/0002-finite-job-execution.md)
+- [Product roadmap (Russian)](docs/roadmap.md)
 - [Contributing](CONTRIBUTING.md), [code of conduct](CODE_OF_CONDUCT.md),
   [security reports](SECURITY.md), [changelog](CHANGELOG.md)
 - [Issues](https://github.com/daniilpet/opencode-jobs/issues) for bugs and feature requests
