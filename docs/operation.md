@@ -160,6 +160,8 @@ When the pump is unavailable but the server responds, the window warns and still
 allows direct cancellation. On loss of the server connection, retained information
 is marked stale and Stop is disabled until a successful refresh. An unconfirmed
 cancellation displays an error; inspect refreshed state before trying again.
+In 0.3.0, the same connection warning is also used for authorization and other
+request failures. See [connection warnings and recovery](#51-connection-warnings-and-recovery).
 
 ## 2. Understand delivery
 
@@ -282,6 +284,65 @@ incur API costs or request additional permissions. Use sensible intervals and
 check unattended jobs regularly. For security findings, see [SECURITY.md](../SECURITY.md).
 
 ## 5. Troubleshooting
+
+### 5.1. Connection warnings and recovery
+
+Warnings remain visible in the bottom indicator and task window. They do not
+prove that a job failed or that its process stopped. After a failed list request,
+retained information is stale and Stop is unavailable until a successful refresh.
+
+**Version scope:** the published 0.3.0 shows **«Задания: связь потеряна»** for all
+list-request failures. The **Unreleased** interface distinguishes authorization,
+transport, and other request errors as listed below. These more specific messages
+require a future release and an updated installation; the recovery guidance also
+applies to 0.3.0.
+
+| Situation | Warning in the Unreleased interface | Checks and recovery |
+|---|---|---|
+| Server rejects authentication, including a stale client after a service password change | «Задания: ошибка авторизации»; the window explains that the server rejected authentication | Reopen the same existing session in a new OpenCode client. This refreshes the client connection without restarting the service. Do not clear credentials or disable authentication as a workaround |
+| Transport failure or request timeout | «Задания: связь потеряна» | Check `opencode service status` under the same user account. If the intended service is stopped, start it with `opencode service start`. Refresh the task list after connectivity returns; a timeout alone does not prove the service stopped |
+| Another request failure, such as an unexpected server response | «Задания: ошибка запроса» | Once the service is reachable, inspect `opencode api get /api/plugin` from the affected project and confirm that jobs is active. Record the versions and a sanitized reproduction if the error persists; this warning alone does not identify the cause |
+| Server responds but the jobs pump is unhealthy | «Планировщик недоступен» | Inspect the jobs task/service and `pump-status.json` as described below. Direct cancellation remains available through the server |
+
+The output view and an unconfirmed Stop also distinguish request failures in the
+Unreleased interface. Raw server errors, headers, and credentials are not displayed.
+Successful list and output reads clear their respective warnings. An error does not trigger
+automatic command replay, service restart, or password changes.
+
+`opencode api` can start the managed service when discovery finds no healthy
+compatible service. Use `opencode service status` first when only inspecting its
+state. Do not delete service-registration files or the OpenCode database as a
+recovery step.
+
+### 5.2. Password changes with an already-open client
+
+The following sequence can trigger the authorization warning in an existing client:
+
+```text
+opencode service unset password
+opencode service start
+opencode service status
+```
+
+This is a reproduction sequence, not a recovery procedure. In OpenCode 2.0.22,
+unsetting the password stops the managed service and removes the configured value.
+The next service start generates and saves a new password; it does not turn
+authentication off. The main terminal client can reconnect, while an already-loaded
+terminal plugin retains its previous client object and authentication headers.
+Jobs requests then receive HTTP 401 even if the pump has discovered the new
+registration and is healthy.
+
+Reopen the affected session in a new terminal client and check `/joblist` again.
+Closing the terminal client does not require stopping the shared server or pump.
+If the warning persists, use the checks in section 5.1 instead of repeatedly
+changing the password or relaunching commands whose outcome is unknown.
+
+The stale client reference is visible in the
+[OpenCode 2.0.22 plugin context](https://github.com/anomalyco/opencode/blob/v2.0.22/packages/tui/src/plugin/api.tsx#L136-L144).
+The diagnostic change in jobs explains this condition; it does not fix the host's
+plugin-client lifecycle or automatically refresh its credentials.
+
+### 5.3. Scheduler health and plugin loading
 
 If `/jobs` reports unhealthy, inspect `pump-status.json` and the new task/service
 described in [DEPLOYMENT.md](../DEPLOYMENT.md). Confirm the server still reports

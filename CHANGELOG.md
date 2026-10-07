@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Keep connection warnings visible while distinguishing authorization failures,
+  transport failures, and other request errors in the task interface. Retain stale
+  data and cancellation safeguards; do not expose raw error details.
+- Document recovery after managed-service password changes, server connection
+  failures, and an unavailable scheduler. This does not repair OpenCode's stale
+  terminal-plugin client after reconnect.
+
 ## 0.3.0 - task management preview
 
 - Open task management from the bottom indicator, command palette, or local

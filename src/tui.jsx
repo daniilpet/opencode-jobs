@@ -10,6 +10,18 @@ const kinds = { background: 'Команда', monitor: 'Монитор', schedul
 const title = (job) => sanitize(job.command ?? job.prompt ?? job.id).replace(/\s+/g, ' ').slice(0, 100);
 const location = (context) => context.location ?? context.data.location.default();
 
+const requestErrors = {
+  authorization: { label: 'ошибка авторизации', message: 'Сервер отклонил авторизацию. Повторно откройте эту сессию в новом клиенте OpenCode.' },
+  transport: { label: 'связь потеряна', message: 'Связь с сервером потеряна. Проверьте состояние службы OpenCode и обновите список.' },
+  request: { label: 'ошибка запроса', message: 'Не удалось выполнить запрос. Проверьте загрузку плагина jobs в текущем проекте.' },
+};
+
+function requestError(error) {
+  if (error?._tag === 'UnauthorizedError') return 'authorization';
+  if (error?.name === 'ClientError' && error.reason === 'Transport') return 'transport';
+  return 'request';
+}
+
 function status(job) {
   if (job.stopPending) return 'Останавливается';
   if (job.workerResult?.status === 'succeeded') return 'Завершается';
@@ -24,6 +36,8 @@ function status(job) {
 }
 
 // Нет ответа -> загрузка; ошибка + старые данные -> устаревшие, без успешных действий.
+// UnauthorizedError -> авторизация; ClientError Transport -> связь; прочие -> запрос.
+// Успешное чтение снимает предупреждение; сырая ошибка не отображается.
 // Ответ + healthy=false -> предупреждение, прямой cancel остаётся доступным.
 // Новая сессия/закрытие -> старый запрос отменяется и не обновляет представление.
 function useJobs(context, sessionID) {
@@ -41,8 +55,8 @@ function useJobs(context, sessionID) {
         location: location(context), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]),
       }).then((result) => {
         if (!controller.signal.aborted) setState({ ...result, loaded: true, error: false });
-      }).catch(() => {
-        if (!controller.signal.aborted) setState((value) => ({ ...value, error: true }));
+      }).catch((error) => {
+        if (!controller.signal.aborted) setState((value) => ({ ...value, error: requestError(error) }));
       }).finally(() => { pending = undefined; });
       return pending;
     };
@@ -68,7 +82,7 @@ function Status(props) {
     <Show when={props.sessionID && (active().length || !state().loaded || !state().healthy || state().error)}>
       <box flexDirection="column">
         <text onMouseUp={() => openJobs(context, props.sessionID)} fg={state().error || (state().loaded && !state().healthy) ? context.theme.error : context.theme.text.base}>
-          {state().error ? 'Задания: связь потеряна' : !state().loaded ? 'Задания: загрузка' : `Задания: ${active().length} · мониторы: ${active().filter((job) => job.kind === 'monitor').length}${state().healthy ? '' : ' · планировщик недоступен'}`} · /joblist
+          {state().error ? `Задания: ${requestErrors[state().error].label}` : !state().loaded ? 'Задания: загрузка' : `Задания: ${active().length} · мониторы: ${active().filter((job) => job.kind === 'monitor').length}${state().healthy ? '' : ' · планировщик недоступен'}`} · /joblist
         </text>
         <Show when={!props.compact}>
           <For each={active()}>{(job) => (
@@ -121,8 +135,8 @@ function Output(props) {
           return next.slice(-32768);
         });
         setError(false);
-      } catch {
-        if (!controller.signal.aborted) setError(true);
+      } catch (error) {
+        if (!controller.signal.aborted) setError(requestError(error));
       } finally {
         if (!controller.signal.aborted) timer = setTimeout(poll, 1000);
       }
@@ -139,10 +153,13 @@ function Output(props) {
   ] }));
   return <box flexDirection="column">
     <Show when={omitted()}><text fg={context.theme.text.muted}>Показан конец вывода; начало опущено.</text></Show>
-    <scrollbox ref={(value) => { scroll = value; }} height={Math.max(3, Math.min(16, dimensions().height - 16))} stickyScroll stickyStart="bottom">
+    <scrollbox ref={(value) => { scroll = value; }} height={Math.max(3, Math.min(16, dimensions().height - 16) - (error() ? 4 : 0))} stickyScroll stickyStart="bottom">
       <text fg={context.theme.text.base} wrapMode="word">{output() === undefined ? (props.job.shellID && !error() ? 'Загрузка вывода…' : sanitize((props.job.preview ?? []).join('\n')) || 'Сохранённого вывода нет.') : sanitize(output()).replace(/\r\n?/g, '\n') || 'Вывода пока нет.'}</text>
     </scrollbox>
-    <Show when={error()}><text fg={context.theme.error}>Не удалось прочитать вывод. Показаны последние полученные данные.</text></Show>
+    <Show when={error()}>
+      <text fg={context.theme.error}>Не удалось прочитать вывод. Показаны последние полученные данные.</text>
+      <text fg={context.theme.error}>{requestErrors[error()]?.message}</text>
+    </Show>
     <text fg={context.theme.text.muted}>↑/↓ прокрутка · end следить за выводом</text>
   </box>;
 }
@@ -185,8 +202,8 @@ function Manager(props) {
         location: location(context), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
       });
       if (!controller.signal.aborted) await reload();
-    } catch {
-      if (!controller.signal.aborted) setActionError('Остановка не подтверждена. Обновите список, чтобы проверить состояние.');
+    } catch (error) {
+      if (!controller.signal.aborted) setActionError(`Остановка не подтверждена. ${requestErrors[requestError(error)].message} Обновите список, чтобы проверить состояние.`);
     } finally { if (!controller.signal.aborted) setStopping(false); }
   };
   const worker = () => {
@@ -211,7 +228,8 @@ function Manager(props) {
       <text fg={context.theme.text.muted} onMouseUp={() => context.ui.dialog.clear()}>Закрыть [esc]</text>
     </box>
     <Show when={state().error} fallback={<Show when={state().loaded && !state().healthy}><text fg={context.theme.error}>Планировщик недоступен. Остановка через сервер доступна.</text></Show>}>
-      <text fg={context.theme.error}>Связь с сервером потеряна. Сведения могут быть устаревшими.</text>
+      <text fg={context.theme.error}>{requestErrors[state().error]?.message}</text>
+      <text fg={context.theme.error}>Сведения могут быть устаревшими.</text>
     </Show>
     <Show when={state().loaded} fallback={<text fg={context.theme.text.muted}>{state().error ? 'Не удалось загрузить задания.' : 'Загрузка заданий…'}</text>}>
       <Show when={details() && selected()} fallback={<>
