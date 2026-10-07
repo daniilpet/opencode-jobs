@@ -192,7 +192,7 @@ test('отмена удаляет все принятые сообщения м�
   assert.equal(f.cancelled.length, 2);
 });
 
-test('история не удаляет задания с принятыми ожидающими сообщениями', async () => {
+test('история и поздняя отмена сохраняют завершённые задания с ожидающими сообщениями', async () => {
   const f = fixture();
   const deliver = f.scheduler.io.deliver;
   f.scheduler.io.deliver = async (entry) => { await deliver(entry); f.pending.add(entry.id); };
@@ -207,8 +207,11 @@ test('история не удаляет задания с принятыми о
     await f.scheduler.tick(i + 1);
     f.pending.add(f.messages.at(-1).id);
   }
-  await f.scheduler.cancel('ses_one', first.id);
-  assert.equal(f.cancelled[0], f.messages[0].id);
+  const before = structuredClone(f.saved());
+  const result = await f.scheduler.cancel('ses_one', first.id);
+  assert.deepEqual(result, before.jobs.find((job) => job.id === first.id));
+  assert.deepEqual(f.saved(), before);
+  assert.deepEqual(f.cancelled, []);
 });
 
 test('заполненная очередь опустошается до создания новых событий', async () => {

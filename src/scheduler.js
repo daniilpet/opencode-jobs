@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { hasJobActivity } from './job-activity.js';
 import { jobLimits } from './limits.js';
 import { sanitize } from './sanitize.js';
 
@@ -154,10 +155,17 @@ export class Scheduler {
     });
   }
 
+  // Сохранённый workerResult=succeeded при любой активности/stopPending -> отказ без изменений.
+  // Иначе матрица активности × stopPending: 00 -> сохранить точный исход;
+  // 10 -> cancelled + остановка; 11 -> только повтор cleanup с прежним исходом;
+  // 01 невозможно: stopPending входит в активность. Проверка после сериализации.
   cancel(sessionID, id) {
     return this.run(async () => {
       const job = this.owned(sessionID, id);
-      await this.stop(job, 'cancelled', 'Задание отменено.', this.io.now?.() ?? Date.now());
+      if (job.workerResult?.status === 'succeeded') throw new Error('Результат задания уже получен; ожидается завершение обработки. Повторите отмену после завершения обработки результата.');
+      if (!hasJobActivity(job)) return structuredClone(job);
+      if (job.stopPending) await this.cleanup(job);
+      else await this.stop(job, 'cancelled', 'Задание отменено.', this.io.now?.() ?? Date.now());
       return structuredClone(job);
     });
   }
@@ -189,6 +197,17 @@ export class Scheduler {
     }
   }
 
+  // cancelled × подтверждённый worker loop × родительская доставка:
+  // 111 -> сохранить result в outbox или принятое уведомление родителю;
+  // остальные сочетания -> обычная отмена доставки. Тип принятого сообщения не хранится.
+  // runMessage и маршруты к worker всегда снимаются; legacy без worker не выводим из defaults.
+  keepCancelledResult(job, id) {
+    if (job.status !== 'cancelled' || job.kind !== 'loop' || job.executionMode !== 'worker' || !job.workerID || id === job.runMessage) return false;
+    const entry = this.state.outbox.find((item) => item.jobID === job.id && item.id === id);
+    if (entry) return entry.type === 'result' && entry.sessionID === job.sessionID;
+    return Boolean(job.messages?.includes(id) && (job.messageSessions?.[id] ?? job.sessionID) === job.sessionID);
+  }
+
   async stop(job, status, reason, now, notify = false) {
     job.status = status;
     job.error = reason;
@@ -196,7 +215,7 @@ export class Scheduler {
     job.stopPending = true;
     delete job.deferredFailure;
     if (notify) job.deferredFailure = { reason, now };
-    this.state.outbox = this.state.outbox.filter((entry) => entry.jobID !== job.id);
+    this.state.outbox = this.state.outbox.filter((entry) => entry.jobID !== job.id || this.keepCancelledResult(job, entry.id));
     await this.persist();
     await this.cleanup(job);
   }
@@ -206,11 +225,13 @@ export class Scheduler {
       await this.io.stopLaunch?.(job);
       if (job.shellID) await this.io.stopShell(job);
       if (job.workerID) await this.io.stopWorker(job);
+      const retained = [];
       for (const id of job.messages ?? (job.lastMessage ? [job.lastMessage] : [])) {
+        if (this.keepCancelledResult(job, id)) { retained.push(id); continue; }
         const sessionID = job.messageSessions?.[id] ?? job.sessionID;
         if (await this.io.isPending(sessionID, id)) await this.io.cancelDelivery(sessionID, id);
       }
-      job.messages = [];
+      job.messages = retained;
       delete job.messageSessions;
       delete job.runMessage;
       delete job.workerResult;
@@ -359,6 +380,7 @@ export class Scheduler {
       if (entry.type === 'prompt' && (!job?.workerID || entry.sessionID !== job.workerID)) throw new Error(`Доставка ${entry.jobID} требует отдельного разбора: отсутствует подтверждённая рабочая сессия.`);
       try {
         const current = this.io.now?.() ?? now;
+        if (job.stopPending && this.keepCancelledResult(job, entry.id)) continue;
         if (job.stopPending || (job.expiresAt <= current && ['prompt', 'output'].includes(entry.type))) {
           await this.stop(job, job.stopPending ? job.status : 'expired', job.stopPending ? job.error : 'Истёк предельный срок работы.', current, job.stopPending ? Boolean(job.deferredFailure) : Boolean(job.workerID));
           continue;

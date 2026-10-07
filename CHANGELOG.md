@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Open task management from the bottom indicator, command palette, or local
+  `/joblist`: current-session active jobs and history, captured shell output,
+  worker-session navigation, and direct cancellation without a model request.
+- Keep executing workers visible after scheduling completes. Show pending cleanup
+  and connection failures, and preserve already-observed completion during a late
+  cancellation, including stored worker results awaiting finalization.
+- Add Bun/OpenTUI interaction tests and real-host Linux task-management checks.
+
 ## 0.2.0 - security preview
 
 ### Security

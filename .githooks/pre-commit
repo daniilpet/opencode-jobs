@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 npm test
+npm run test:tui
 npm run check
 npm run check:security-dependencies
 npm run check:bridge-lifetime

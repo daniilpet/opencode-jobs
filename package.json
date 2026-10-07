@@ -18,6 +18,7 @@
   },
   "scripts": {
     "test": "node --expose-gc --test",
+    "test:tui": "bun test --preload @opentui/solid/preload ./test-tui/",
     "audit:dependencies": "npm audit --package-lock-only --include=dev --include=optional --include=peer --audit-level=info",
     "check": "node scripts/check.js",
     "check:security-dependencies": "node scripts/check-security-dependencies.js",

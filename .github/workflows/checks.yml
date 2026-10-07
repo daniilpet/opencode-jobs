@@ -85,7 +85,12 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci --ignore-scripts
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          # Matches the checked Bun/OpenTUI rendering baseline; Node runs backend tests.
+          bun-version: '1.3.14'
       - run: npm test
+      - run: npm run test:tui
       - run: npm run check
       - run: npm run check:security-dependencies
       - run: npm run check:bridge-lifetime

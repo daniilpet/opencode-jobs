@@ -33,6 +33,12 @@ The model can also call the six `opencode_jobs_*` tools. A small terminal indica
 shows the scheduler's status. Each machine has its own jobs; no shared coordinator
 or extra HTTP server is installed.
 
+**Unreleased interface:** click the bottom jobs indicator or use `/joblist` to open
+the current session's task manager. Inspect active jobs and history, read captured
+command output, open a worker session, or stop a selected job directly without a
+model request. This interface is not included in the published v0.2.0 bundle.
+See [task management](docs/operation.md#12-terminal-task-management-unreleased).
+
 The plugin adds [tool-selection guidance](docs/operation.md#11-model-tool-selection)
 to the model's working system context: prefer background jobs for long commands,
 monitor meaningful output events, and schedule only requested future work. Guidance
