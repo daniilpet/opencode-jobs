@@ -39,6 +39,14 @@ command output, open a worker session, or stop a selected job directly without a
 model request. This interface is included in the v0.3.0 bundle.
 See [task management](docs/operation.md#12-terminal-task-management).
 
+**Known connection issue:** after changing the managed OpenCode service password
+and restarting the service, an already-open jobs panel can keep using the old
+connection. In 0.3.0, **«Задания: связь потеряна»** can also mean an authorization
+failure while the server and scheduler are healthy. Reopen the same session in a
+new OpenCode client. See [connection warnings and recovery](docs/operation.md#51-connection-warnings-and-recovery)
+for other causes and checks. Clearing the configured service password does not
+disable authentication; the next service start generates a password.
+
 The plugin adds [tool-selection guidance](docs/operation.md#11-model-tool-selection)
 to the model's working system context: prefer background jobs for long commands,
 monitor meaningful output events, and schedule only requested future work. Guidance

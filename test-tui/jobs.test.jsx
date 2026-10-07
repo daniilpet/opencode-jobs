@@ -2,12 +2,13 @@
 import { afterEach, expect, test } from 'bun:test';
 import { createSignal, Show, onCleanup } from 'solid-js';
 import { testRender } from '@opentui/solid';
+import { OpenCode } from '@opencode/client/promise';
 import plugin from '../src/tui.jsx';
 
 const renderers = [];
 afterEach(() => { for (const renderer of renderers.splice(0)) renderer.destroy(); });
 
-async function screen(jobs = [{ id: 'job_monitor', kind: 'monitor', status: 'active', command: 'watch-build', created: 1000 }]) {
+async function screen(jobs = [{ id: 'job_monitor', kind: 'monitor', status: 'active', command: 'watch-build', created: 1000 }], client) {
   const slots = new Map();
   const layers = [];
   const [dialog, setDialog] = createSignal();
@@ -18,7 +19,7 @@ async function screen(jobs = [{ id: 'job_monitor', kind: 'monitor', status: 'act
     theme: { text: { base: '#ffffff', muted: '#aaaaaa' }, error: '#ff0000' },
     location: { directory: '/fixture' },
     data: { location: { default: () => ({ directory: '/fixture' }) } },
-    client: {
+    client: client ?? {
       rpc: () => ({
         list: async (input, options) => { calls.list.push({ input, options }); if (remote.list) return remote.list(input); if (remote.error) throw new Error('offline'); return { jobs: structuredClone(remote.jobs), healthy: remote.healthy }; },
         cancel: async (input) => { calls.cancel.push(input); if (remote.cancel) return remote.cancel(input); const job = remote.jobs.find((item) => item.id === input.id); job.status = 'cancelled'; delete job.runMessage; return { job }; },
@@ -177,6 +178,100 @@ test('сбой чтения помечает сохранённые сведен
   expect(view.captureCharFrame()).toContain('Сведения могут быть устаревшими');
   expect(view.captureCharFrame()).toContain('watch-build');
   expect(view.captureCharFrame()).not.toContain('Остановить [ctrl+x]');
+});
+
+test('401 SDK сохраняет предупреждение авторизации, данные и запрет остановки', async () => {
+  const view = await screen();
+  await view.click('Задания:');
+  view.context.client = OpenCode.make({ baseUrl: 'http://127.0.0.1', fetch: async () => Response.json({ _tag: 'UnauthorizedError', message: 'token=FIXTURE_SECRET' }, { status: 401 }) });
+  await view.command('opencode.jobs.refresh').run();
+  await view.waitForFrame((frame) => frame.includes('Сервер отклонил авторизацию'));
+  expect(view.captureCharFrame()).toContain('Сервер отклонил авторизацию');
+  expect(view.captureCharFrame()).toContain('новом клиенте OpenCode');
+  expect(view.captureCharFrame()).toContain('Сведения могут быть устаревшими');
+  expect(view.captureCharFrame()).toContain('watch-build');
+  expect(view.captureCharFrame()).not.toContain('Остановить [ctrl+x]');
+  expect(view.captureCharFrame()).not.toContain('FIXTURE_SECRET');
+});
+
+test('первая ошибка авторизации не скрывается за загрузкой', async () => {
+  const client = OpenCode.make({ baseUrl: 'http://127.0.0.1', fetch: async () => Response.json({ _tag: 'UnauthorizedError' }, { status: 401 }) });
+  const view = await screen([], client);
+  await view.waitForFrame((frame) => frame.includes('Задания: ошибка авторизации'));
+  view.command('opencode.jobs.open').run();
+  await view.waitForFrame((frame) => frame.includes('Сервер отклонил авторизацию'));
+  expect(view.captureCharFrame()).toContain('Не удалось загрузить задания');
+  expect(view.captureCharFrame()).not.toContain('Загрузка заданий');
+});
+
+test('ошибка транспорта SDK остаётся предупреждением потери связи', async () => {
+  const view = await screen();
+  await view.click('Задания:');
+  view.context.client = OpenCode.make({ baseUrl: 'http://127.0.0.1', fetch: async () => { throw new TypeError('fetch failed token=FIXTURE_SECRET'); } });
+  await view.command('opencode.jobs.refresh').run();
+  await view.waitForFrame((frame) => frame.includes('Проверьте состояние службы OpenCode'));
+  expect(view.captureCharFrame()).toContain('Связь с сервером потеряна');
+  expect(view.captureCharFrame()).not.toContain('Сервер отклонил авторизацию');
+  expect(view.captureCharFrame()).not.toContain('FIXTURE_SECRET');
+});
+
+test('прочий отказ сервера не объявляется потерей связи или авторизации', async () => {
+  const view = await screen();
+  await view.click('Задания:');
+  view.context.client = OpenCode.make({ baseUrl: 'http://127.0.0.1', fetch: async () => new Response('token=FIXTURE_SECRET', { status: 502 }) });
+  await view.command('opencode.jobs.refresh').run();
+  await view.waitForFrame((frame) => frame.includes('Не удалось выполнить запрос'));
+  expect(view.captureCharFrame()).not.toContain('Связь с сервером потеряна');
+  expect(view.captureCharFrame()).not.toContain('Сервер отклонил авторизацию');
+  expect(view.captureCharFrame()).not.toContain('FIXTURE_SECRET');
+});
+
+test('успешное чтение снимает предупреждение авторизации и возвращает остановку', async () => {
+  const view = await screen();
+  await view.click('Задания:');
+  const original = view.context.client;
+  view.context.client = OpenCode.make({ baseUrl: 'http://127.0.0.1', fetch: async () => Response.json({ _tag: 'UnauthorizedError' }, { status: 401 }) });
+  await view.command('opencode.jobs.refresh').run();
+  await view.waitForFrame((frame) => frame.includes('Сервер отклонил авторизацию'));
+  view.context.client = original;
+  await view.command('opencode.jobs.refresh').run();
+  await view.waitForFrame((frame) => frame.includes('Остановить [ctrl+x]'));
+  expect(view.captureCharFrame()).not.toContain('Сервер отклонил авторизацию');
+  expect(view.captureCharFrame()).not.toContain('Сведения могут быть устаревшими');
+});
+
+test('401 чтения вывода показывает причину и сохранённый текст', async () => {
+  const view = await screen([{ id: 'job_shell', kind: 'background', status: 'active', shellID: 'sh_one', command: 'auth-output', preview: ['SAVED_PREVIEW'], created: 1000 }]);
+  const client = OpenCode.make({ baseUrl: 'http://127.0.0.1', fetch: async () => Response.json({ _tag: 'UnauthorizedError' }, { status: 401 }) });
+  view.remote.output = (input, options) => client.shell.output(input, options);
+  await view.click('Задания:');
+  await view.click('auth-output');
+  await view.waitForFrame((frame) => frame.includes('Сервер отклонил авторизацию'));
+  expect(view.captureCharFrame()).toContain('SAVED_PREVIEW');
+});
+
+test('401 при остановке показывает причину без ложного подтверждения отмены', async () => {
+  const view = await screen();
+  await view.click('Задания:');
+  view.context.client = OpenCode.make({ baseUrl: 'http://127.0.0.1', fetch: async () => Response.json({ _tag: 'UnauthorizedError' }, { status: 401 }) });
+  await view.command('opencode.jobs.stop').run();
+  await view.waitForFrame((frame) => frame.includes('Остановка не подтверждена. Сервер отклонил авторизацию'));
+  expect(view.remote.jobs[0].status).toBe('active');
+});
+
+test('в узком окне предупреждение авторизации вывода не накладывается на соседний текст', async () => {
+  const view = await screen([{ id: 'job_12345678-1234-1234-1234-123456789012', kind: 'monitor', status: 'active', shellID: 'sh_one', command: 'watch-build', preview: ['SAVED_PREVIEW'], created: 1000, expiresAt: Date.now() + 60000 }]);
+  const client = OpenCode.make({ baseUrl: 'http://127.0.0.1', fetch: async () => Response.json({ _tag: 'UnauthorizedError' }, { status: 401 }) });
+  view.remote.output = (input, options) => client.shell.output(input, options);
+  view.resize(60, 35);
+  await view.click('Задания:');
+  await view.click('watch-build');
+  await view.waitForFrame((frame) => frame.includes('OpenCode'));
+  expect(view.captureCharFrame()).toContain('Сервер отклонил авторизацию');
+  expect(view.captureCharFrame()).toContain('Не удалось прочитать вывод.');
+  expect(view.captureCharFrame()).toContain('К списку [backspace]');
+  expect(view.captureCharFrame()).toContain('Остановить [ctrl+x]');
+  expect(view.captureCharFrame()).toContain('Обновить [r]');
 });
 
 test('при смене сессии открытое окно закрывается и его запрос отменяется', async () => {
