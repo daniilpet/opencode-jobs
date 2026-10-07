@@ -1,6 +1,6 @@
 {
   "name": "opencode-jobs",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Persistent node-local background jobs, monitors, schedules and loops for OpenCode V2",
   "license": "MIT",
   "repository": {

@@ -1,7 +1,7 @@
 # Installation and operations
 
-This guide targets **0.3.0 preview**, including terminal task management, finite job
-limits and dedicated scheduled-work sessions. Existing
+This guide targets **0.3.1 preview**, including connection diagnostics, terminal task
+management, finite job limits and dedicated scheduled-work sessions. Existing
 installations require a separately reviewed manual update as described in section 4.
 
 ## 1. Prerequisites
@@ -38,16 +38,16 @@ On Linux, with both files in the current directory:
 
 ```sh
 sha256sum -c SHA256SUMS
-tar -xzf opencode-jobs-0.3.0.tar.gz
-cd opencode-jobs-0.3.0
+tar -xzf opencode-jobs-0.3.1.tar.gz
+cd opencode-jobs-0.3.1
 ```
 
-On Windows, compare `Get-FileHash .\opencode-jobs-0.3.0.tar.gz -Algorithm SHA256`
+On Windows, compare `Get-FileHash .\opencode-jobs-0.3.1.tar.gz -Algorithm SHA256`
 with the archive's line in `SHA256SUMS`, then:
 
 ```powershell
-tar -xzf .\opencode-jobs-0.3.0.tar.gz
-Set-Location .\opencode-jobs-0.3.0
+tar -xzf .\opencode-jobs-0.3.1.tar.gz
+Set-Location .\opencode-jobs-0.3.1
 ```
 
 The archive includes `.runtime/package` and `scripts/`. Do not relocate either

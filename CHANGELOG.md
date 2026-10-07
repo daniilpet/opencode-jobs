@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.1 - connection diagnostics preview
+
 - Keep connection warnings visible while distinguishing authorization failures,
   transport failures, and other request errors in the task interface. Retain stale
   data and cancellation safeguards; do not expose raw error details.

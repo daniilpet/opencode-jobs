@@ -12,9 +12,9 @@ with the terminal UI closed, provided the machine, shared OpenCode server, and
 local scheduler process are running. It does not automatically replay interrupted
 shell commands or silently execute missed prompts late.
 
-**Version scope:** this checkout describes **0.3.0 preview**, including terminal
-task management, finite job limits and dedicated scheduled-work sessions. Task
-management is new since v0.2.0. Existing installations require a reviewed manual update;
+**Version scope:** this checkout describes **0.3.1 preview**, including connection
+diagnostics, terminal task management, finite job limits and dedicated scheduled-work
+sessions. Connection diagnostics are new since v0.3.0. Existing installations require a reviewed manual update;
 installers refuse to overwrite them.
 
 ## What you can do
@@ -36,13 +36,14 @@ or extra HTTP server is installed.
 **Task management:** click the bottom jobs indicator or use `/joblist` to open
 the current session's task manager. Inspect active jobs and history, read captured
 command output, open a worker session, or stop a selected job directly without a
-model request. This interface is included in the v0.3.0 bundle.
+model request. This interface is included starting with v0.3.0.
 See [task management](docs/operation.md#12-terminal-task-management).
 
 **Known connection issue:** after changing the managed OpenCode service password
 and restarting the service, an already-open jobs panel can keep using the old
 connection. In 0.3.0, **«Задания: связь потеряна»** can also mean an authorization
-failure while the server and scheduler are healthy. Reopen the same session in a
+failure while the server and scheduler are healthy. Version 0.3.1 distinguishes
+authorization, transport, and other request failures. Reopen the same session in a
 new OpenCode client. See [connection warnings and recovery](docs/operation.md#51-connection-warnings-and-recovery)
 for other causes and checks. Clearing the configured service password does not
 disable authentication; the next service start generates a password.
