@@ -7,12 +7,13 @@ function fixture(initial) {
   const cancelled = [];
   let snapshot = initial;
   let reject = false;
+  let observe = { status: 'running' };
   const pending = new Set();
   const scheduler = new Scheduler({
     load: async () => snapshot,
     save: async (value) => { snapshot = structuredClone(value); },
     prepareWorker: async (job) => `ses_worker_${job.id}`,
-    observeWorker: async () => ({ status: 'running' }),
+    observeWorker: async () => structuredClone(observe),
     stopWorker: async () => {},
     deliver: async (value) => {
       if (reject) throw new Error('transport unavailable');
@@ -22,7 +23,7 @@ function fixture(initial) {
     wasAdmitted: async (sessionID, id) => messages.some((item) => item.id === id),
     cancelDelivery: async (sessionID, id) => { cancelled.push(id); },
   });
-  return { scheduler, messages, pending, cancelled, saved: () => snapshot, reject: (value) => { reject = value; } };
+  return { scheduler, messages, pending, cancelled, saved: () => snapshot, reject: (value) => { reject = value; }, observe: (value) => { observe = value; } };
 }
 
 test('разовый запрос доставляется в отдельную сессию ровно один раз', async () => {
@@ -288,4 +289,44 @@ test('начальная загрузка входит в ожидание за�
   await assert.rejects(loading, /остановлен/);
   await closing;
   assert.equal(closed, true);
+});
+
+test('add сохраняет создателя и заголовок создателя', async () => {
+  const f = fixture();
+  await f.scheduler.load(0);
+  const job = await f.scheduler.add('ses_root', { kind: 'background', command: 'x', timeout: 60000, createdBy: 'ses_child', createdByTitle: 'Ревью' }, 0);
+  assert.equal(job.createdBy, 'ses_child');
+  assert.equal(job.createdByTitle, 'Ревью');
+  assert.equal((await f.scheduler.list('ses_root'))[0].createdByTitle, 'Ревью');
+});
+
+test('сбой задания субагента помечает источник в уведомлении', async () => {
+  const f = fixture();
+  await f.scheduler.load(0);
+  const job = await f.scheduler.add('ses_root', { kind: 'background', command: 'x', timeout: 60000, createdBy: 'ses_child', createdByTitle: 'Ревью кода' }, 0);
+  await f.scheduler.report('ses_root', job.id, 'Команда не запущена.', 1000);
+  await f.scheduler.tick(2000);
+  assert.equal(f.messages.length, 1);
+  assert.equal(f.messages[0].sessionID, 'ses_root');
+  assert.match(f.messages[0].text, /^Задание субагента "Ревью кода": OpenCode jobs: задание/);
+});
+
+test('запрос worker-а задания субагента остаётся без пометки источника', async () => {
+  const f = fixture();
+  await f.scheduler.load(0);
+  await f.scheduler.add('ses_root', { kind: 'loop', interval: 1000, prompt: 'проверь', timeout: 60000, maxRuns: 2, createdBy: 'ses_child', createdByTitle: 'Ревью кода' }, 0);
+  await f.scheduler.tick(1000);
+  assert.equal(f.messages.length, 1);
+  assert.equal(f.messages[0].text, 'проверь');
+});
+
+test('результат задания субагента помечает источник', async () => {
+  const f = fixture();
+  await f.scheduler.load(0);
+  await f.scheduler.add('ses_root', { kind: 'loop', interval: 1000, prompt: 'проверь', timeout: 60000, maxRuns: 2, createdBy: 'ses_child', createdByTitle: 'Ревью кода' }, 0);
+  await f.scheduler.tick(1000);
+  f.observe({ status: 'succeeded', text: 'готово' });
+  await f.scheduler.tick(1500);
+  const result = f.messages.find((item) => item.type === 'result');
+  assert.match(result.text, /^Задание субагента "Ревью кода": OpenCode jobs: результат/);
 });

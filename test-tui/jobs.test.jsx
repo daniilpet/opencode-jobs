@@ -308,3 +308,17 @@ test('в узком терминале сведения и кнопка оста
   expect(view.captureCharFrame()).toContain('Монитор');
   expect(view.captureCharFrame()).toContain('Остановить [ctrl+x]');
 });
+
+test('задания субагента помечены в списке и деталях, свои без метки', async () => {
+  const view = await screen([
+    { id: 'job_own', kind: 'monitor', status: 'active', command: 'watch-build', created: 2000, sessionID: 'ses_root' },
+    { id: 'job_agent', kind: 'background', status: 'active', command: 'agent-run', created: 1000, sessionID: 'ses_root', createdBy: 'ses_child', createdByTitle: 'Ревью кода' },
+  ]);
+  await view.click('Задания:');
+  await view.waitForFrame((frame) => frame.includes('agent-run'));
+  expect((view.captureCharFrame().match(/\[Агент\]/g) ?? []).length).toBe(1);
+  await view.click('agent-run');
+  await view.waitForFrame((frame) => frame.includes('Создано: субагент'));
+  expect(view.captureCharFrame()).toContain('Ревью кода');
+  expect(view.captureCharFrame()).toContain('ses_child');
+});

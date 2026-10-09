@@ -123,10 +123,21 @@ jobs indicator, select **Задания и мониторы** in the command pal
 `/joblist` in slash completion. This local command opens the interface directly;
 `/jobs` remains the existing model-facing status command.
 
-The window is scoped to the current session. Active entries include commands,
+The window is scoped to the conversation that owns the jobs. Active entries include commands,
 monitors, future schedules, repeating jobs, and workers that are still executing
 after scheduling has completed. Use the arrow keys and Enter, or click a row, to
 inspect an entry. Press `h` to switch between active entries and retained history.
+
+A job created inside a child session, such as a subagent, belongs to the root
+conversation of that chain. It appears in the root session's window marked
+**[Агент]**; its details show the creating session, and its notifications are
+delivered to the root conversation with the creating agent named in the message.
+Every session of the chain sees the same shared list, while unrelated sessions
+stay isolated. A scheduled or repeating job created by a subagent forks its
+worker snapshot from the root conversation, so the worker works with the root
+conversation's context. Jobs saved by earlier versions keep their original
+session attribution; no state migration is performed. Worker sessions still
+cannot create nested jobs.
 
 The detail view shows the job type, command/prompt, state, scheduled time and
 remaining execution lifetime when available. Captured shell output updates while

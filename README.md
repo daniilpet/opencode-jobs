@@ -36,7 +36,9 @@ or extra HTTP server is installed.
 **Task management:** click the bottom jobs indicator or use `/joblist` to open
 the current session's task manager. Inspect active jobs and history, read captured
 command output, open a worker session, or stop a selected job directly without a
-model request. This interface is included starting with v0.3.0.
+model request. Jobs started by subagents belong to your conversation: they are
+marked in the list and their results are delivered back to you.
+This interface is included starting with v0.3.0.
 See [task management](docs/operation.md#12-terminal-task-management).
 
 **Known connection issue:** after changing the managed OpenCode service password
