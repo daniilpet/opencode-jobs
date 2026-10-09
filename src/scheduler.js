@@ -246,10 +246,12 @@ export class Scheduler {
     await this.persist();
   }
 
+  // Уведомления задания субагента помечают источник; запросы worker-а - нет.
   enqueue(job, text, type, now) {
     if (this.outstanding() >= 100) throw new Error('Очередь заданий переполнена; требуется восстановить доставку.');
     const id = `msg_jobs_${job.id.slice(4).replaceAll('-', '')}_${++job.sequence}`;
     const sessionID = type === 'prompt' ? job.workerID : job.sessionID;
+    if (type !== 'prompt' && job.createdBy && job.createdBy !== job.sessionID) text = `Задание субагента${job.createdByTitle ? ` "${sanitize(job.createdByTitle).replace(/\s+/g, ' ').trim()}"` : ''}: ${text}`;
     const entry = { id, jobID: job.id, sessionID, type, text, created: now, due: job.due ?? now, coalesced: job.coalesced };
     if (sessionID !== job.sessionID) (job.messageSessions ??= {})[id] = sessionID;
     this.state.outbox.push(entry);

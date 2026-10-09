@@ -45,6 +45,21 @@ export default {
     };
     const shellRequest = async (job, suffix = '', options = {}) => unwrap(await request(`/api/shell/${job.shellID}${suffix}`, { directory: job.directory, signal: AbortSignal.any([lifetime, AbortSignal.timeout(5000)]), ...options }));
     const inbox = async (sessionID) => unwrap(await request(`/api/session/${sessionID}/inbox`, { signal: AbortSignal.any([lifetime, AbortSignal.timeout(5000)]) }));
+    // Атрибуция: задание принадлежит корневой беседе цепочки parentID, создатель сохраняется рядом.
+    // Недоступная сессия или цикл в цепочке - ошибка без предположений, не тихий fallback.
+    const rootOf = async (sessionID, session) => {
+      let currentID = sessionID;
+      let current = session ?? unwrap(await ctx.session.get({ sessionID: currentID }));
+      if (!current) throw new Error('Недоступна сессия цепочки заданий.');
+      const creatorTitle = sanitize(current.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+      for (let depth = 0; current.parentID; depth++) {
+        if (depth >= 16) throw new Error('Цепочка родительских сессий слишком глубока; операция отклонена.');
+        currentID = current.parentID;
+        current = unwrap(await ctx.session.get({ sessionID: currentID }));
+        if (!current) throw new Error('Недоступна родительская сессия цепочки заданий.');
+      }
+      return { sessionID: currentID, creatorTitle };
+    };
     const pending = async (sessionID, id) => {
       try { return (await inbox(sessionID)).some((item) => item.id === id); } catch (error) {
         if (!String(error.message).includes('HTTP 404')) throw error;
@@ -144,28 +159,32 @@ export default {
         if (session.metadata?.opencodeJobsWorker) throw new Error('Сессия задания не может создавать вложенные задания.');
         const config = parse(input.name, input.raw);
         if (!['background', 'monitor', 'loop', 'schedule'].includes(config.kind)) throw new Error('Эта команда не создаёт задания.');
-        const job = await scheduler.add(input.sessionID, { ...config, ...jobLimits(config.kind, input.timeout, input.maxRuns) }, Date.now(), session.location.directory);
+        const root = await rootOf(input.sessionID, session);
+        const job = await scheduler.add(root.sessionID, { ...config, ...jobLimits(config.kind, input.timeout, input.maxRuns), ...(root.sessionID !== input.sessionID ? { createdBy: input.sessionID, createdByTitle: root.creatorTitle } : {}) }, Date.now(), session.location.directory);
         return { job };
       },
       attach: async (input) => {
         if (!/^sh_/.test(input.shellID)) throw new Error('Некорректный shell ID.');
-        const job = (await scheduler.list(input.sessionID)).find((item) => item.id === input.id);
+        const root = await rootOf(input.sessionID);
+        const job = (await scheduler.list(root.sessionID)).find((item) => item.id === input.id);
         if (!job) throw new Error('Задание не найдено.');
         const info = await request(`/api/shell/${input.shellID}`, { directory: job.directory });
         if (unwrap(info).metadata.sessionID !== input.sessionID) throw new Error('Shell принадлежит другой сессии.');
-        const attached = await scheduler.attach(input.sessionID, input.id, input.shellID, Date.now(), unwrap(info).time.started);
+        const attached = await scheduler.attach(root.sessionID, input.id, input.shellID, Date.now(), unwrap(info).time.started);
         return { job: attached };
       },
       fail: async (input) => {
-        await scheduler.report(input.sessionID, input.id, sanitize(input.reason ?? 'Запуск команды не завершён.'));
+        const root = await rootOf(input.sessionID);
+        await scheduler.report(root.sessionID, input.id, sanitize(input.reason ?? 'Запуск команды не завершён.'));
         return { ok: true };
       },
       list: async (input) => {
-        await ctx.session.get({ sessionID: input.sessionID });
-        return { jobs: await scheduler.list(input.sessionID), lastTick: scheduler.state.lastTick, healthy: Date.now() - scheduler.state.lastTick < 5000, pending: scheduler.outstanding() };
+        const root = await rootOf(input.sessionID);
+        return { jobs: await scheduler.list(root.sessionID), lastTick: scheduler.state.lastTick, healthy: Date.now() - scheduler.state.lastTick < 5000, pending: scheduler.outstanding() };
       },
       cancel: async (input) => {
-        const job = await scheduler.cancel(input.sessionID, input.id);
+        const root = await rootOf(input.sessionID);
+        const job = await scheduler.cancel(root.sessionID, input.id);
         return { job };
       },
     };

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Attribute jobs created inside child sessions (subagents) to the root
+  conversation: they appear in its task manager marked with the creating agent,
+  results wake the root conversation, and every session of the chain can stop
+  them. Unrelated sessions remain isolated. Previously saved jobs keep their
+  original attribution.
+
 ## 0.3.1 - connection diagnostics preview
 
 - Keep connection warnings visible while distinguishing authorization failures,

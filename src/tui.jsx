@@ -8,6 +8,7 @@ import { sanitize } from './sanitize.js';
 
 const kinds = { background: 'Команда', monitor: 'Монитор', schedule: 'По расписанию', loop: 'Повторяющееся' };
 const title = (job) => sanitize(job.command ?? job.prompt ?? job.id).replace(/\s+/g, ' ').slice(0, 100);
+const agent = (job) => Boolean(job.createdBy && job.createdBy !== job.sessionID);
 const location = (context) => context.location ?? context.data.location.default();
 
 const requestErrors = {
@@ -238,7 +239,7 @@ function Manager(props) {
           <Show when={visible().length} fallback={<text fg={context.theme.text.muted}>{history() ? 'История пуста.' : 'Активных заданий нет.'}</text>}>
             <For each={visible()}>{(job) => <box id={job.id} flexDirection="column" onMouseUp={() => { setSelectedID(job.id); setDetails(true); }}>
               <text fg={context.theme.text.base}>{selectedID() === job.id ? '› ' : '  '}{kinds[job.kind]} · {status(job)}</text>
-              <text fg={context.theme.text.muted} wrapMode="none">  {title(job)}</text>
+              <text fg={context.theme.text.muted} wrapMode="none">  {agent(job) ? '[Агент] ' : ''}{title(job)}</text>
             </box>}</For>
           </Show>
         </scrollbox>
@@ -247,6 +248,7 @@ function Manager(props) {
         <text fg={context.theme.text.base}>{kinds[selected().kind]} · {stopping() ? 'Останавливается' : status(selected())}</text>
         <text fg={context.theme.text.muted} wrapMode="word" maxHeight={3}>{title(selected())}</text>
         <text fg={context.theme.text.muted}>{sanitize(selected().id)}{selected().due ? ` · запуск: ${new Date(selected().due).toLocaleString()}` : ''}</text>
+        <Show when={agent(selected())}><text fg={context.theme.text.muted}>Создано: субагент {sanitize(selected().createdByTitle ?? '').replace(/\s+/g, ' ').trim() || 'без названия'} ({selected().createdBy})</text></Show>
         <Show when={hasJobActivity(selected()) && Number.isFinite(selected().expiresAt)}><text fg={context.theme.text.muted}>До предельного срока: {Math.max(0, Math.ceil((selected().expiresAt - Date.now()) / 1000))} с</text></Show>
         <Show when={selected().error}><text fg={context.theme.error} maxHeight={3}>{sanitize(selected().error)}</text></Show>
         <Output context={context} job={selected()} />
