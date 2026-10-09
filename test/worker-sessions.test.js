@@ -12,7 +12,7 @@ const user = { id: job.runMessage, type: 'user', text: 'Current task', time: { c
 const answer = { id: 'msg_answer', type: 'assistant', content: [{ type: 'text', text: 'Current result' }], time: { created: 210, completed: 290 }, finish: 'stop' };
 const idle = { id: 'msg_idle', type: 'idle', time: { created: 300 }, outcome: 'succeeded' };
 
-async function fixture(t) {
+async function fixture(t, version = '2.0.22') {
   const state = {
     session: { id: job.workerID, fork: { sessionID: job.sessionID }, metadata: { retained: 'value', opencodeJobsWorker: { ...ownership } }, permissions: [{ action: 'edit', resource: '*', effect: 'deny' }], time: { created: 100, idle: 300 }, outcome: 'succeeded' },
     inbox: [], active: {}, messages: [user, answer, idle], calls: [], pages: [],
@@ -24,7 +24,7 @@ async function fixture(t) {
     const path = url.pathname;
     const body = raw ? JSON.parse(raw) : undefined;
     const send = (data, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
-    if (path === '/api/info') return send({ version: '2.0.22', pid: process.pid });
+    if (path === '/api/info') return send({ version, pid: process.pid });
     state.calls.push({ method: req.method, path, query: url.searchParams.toString(), body });
     if (path === '/api/session/ses_parent/fork') return send({ data: state.session });
     if (path === '/api/session/active') return send({ data: state.active });
@@ -41,7 +41,7 @@ async function fixture(t) {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const root = await mkdtemp(join(tmpdir(), 'jobs-worker-test-'));
   const registration = join(root, 'service.json');
-  await writeFile(registration, JSON.stringify({ url: `http://127.0.0.1:${server.address().port}`, password: 'synthetic-worker-password', pid: process.pid, version: '2.0.22' }));
+  await writeFile(registration, JSON.stringify({ url: `http://127.0.0.1:${server.address().port}`, password: 'synthetic-worker-password', pid: process.pid, version }));
   const previous = process.env.OPENCODE_JOBS_SERVICE_FILE;
   process.env.OPENCODE_JOBS_SERVICE_FILE = registration;
   t.after(() => {
@@ -82,6 +82,13 @@ test('prepare возвращает ID только после durable metadata �
     { action: 'opencode_jobs_loop', resource: '*', effect: 'deny' },
   ]);
   assert.deepEqual(state.calls.map((call) => call.method), ['POST', 'update']);
+});
+
+test('тот же prepare работает на host 2.0.24', async (t) => {
+  const { state, workers } = await fixture(t, '2.0.24');
+  delete state.session.metadata.opencodeJobsWorker;
+  assert.equal(await workers.prepare(job), job.workerID);
+  assert.deepEqual(state.session.metadata, { retained: 'value', opencodeJobsWorker: ownership });
 });
 
 test('ошибка конфигурации не выдаёт worker ID и не dispatch исходного prompt', async (t) => {

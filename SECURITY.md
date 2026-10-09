@@ -2,7 +2,8 @@
 
 ## Supported scope
 
-The 0.3.1 preview is tested with OpenCode 2.0.22 on Windows and Linux only.
+The 0.3.1 preview runs on OpenCode 2.x (2.0.22 or newer); versions 2.0.22, 2.0.24,
+and 2.0.26 are verified on Windows and Linux.
 Compatibility and security of newer hosts or unsupported platforms are not
 claimed. Patches will be handled on a best-effort basis; there is no response SLA.
 
@@ -68,7 +69,7 @@ maintainer and keep affected users' data out of the report.
 
 ## Dependency security and compatibility
 
-The source toolchain preserves OpenCode/plugin SDK 2.0.22, OpenTUI 0.5.14, and
+The source toolchain preserves OpenCode/plugin SDK 2.0.24, OpenTUI 0.5.14, and
 Solid/preset 1.9.12. Two targeted `package.json` overrides address advisories that
 cannot be fixed by refreshing the lockfile within the upstream ranges:
 

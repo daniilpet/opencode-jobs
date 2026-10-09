@@ -356,8 +356,8 @@ plugin-client lifecycle or automatically refresh its credentials.
 
 If `/jobs` reports unhealthy, inspect `pump-status.json` and the new task/service
 described in [DEPLOYMENT.md](../DEPLOYMENT.md). Confirm the server still reports
-2.0.22 and is reachable under the same account. The pump records connection errors
-and retries its tick; it does not repeat native shell launches.
+a supported 2.x version and is reachable under the same account. The pump records
+connection errors and retries its tick; it does not repeat native shell launches.
 
 If a command is not listed, inspect `opencode api get /api/plugin` and
 `opencode api get /api/command` from the affected location. Confirm that the built

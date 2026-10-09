@@ -5,11 +5,11 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const plugin = join(homedir(), '.config', 'opencode', 'plugins', 'jobs');
-const { request, call } = await import(pathToFileURL(join(plugin, 'src', 'bridge.js')));
+const { request, call, supportedHost } = await import(pathToFileURL(join(plugin, 'src', 'bridge.js')));
 const { stateDirectory } = await import(pathToFileURL(join(plugin, 'src', 'paths.js')));
 const unwrap = (value) => value?.data ?? value;
 const info = await request('/api/info');
-assert.equal(info.version, '2.0.22');
+assert.ok(supportedHost(info.version), `Unexpected OpenCode version: ${info.version}`);
 const plugins = unwrap(await request('/api/plugin', { directory: homedir() }));
 assert.ok(plugins.some((item) => item.id === 'opencode.jobs' && item.state.status === 'active' && item.features.tui));
 const commands = unwrap(await request('/api/command', { directory: homedir() }));

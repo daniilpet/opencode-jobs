@@ -97,6 +97,9 @@ for (const [name, values] of [
   ['пробельный пароль', { password: '   ' }],
   ['пароль неверного типа', { password: 42 }],
   ['неверная версия', { version: '2.0.21' }],
+  ['старший major', { version: '3.0.0' }],
+  ['пререлиз', { version: '2.0.27-beta.1' }],
+  ['четырёхкомпонентная', { version: '2.0.22.5' }],
   ['pid отсутствует', { pid: undefined }],
   ['pid строкой', { pid: String(process.pid) }],
   ['pid отрицательный', { pid: -1 }],
@@ -116,6 +119,30 @@ test('повреждённый JSON регистрации отклоняетс�
   const outbound = t.mock.method(globalThis, 'fetch', async () => { throw new Error('network forbidden'); });
   await assert.rejects(request('/api/info'), (error) => !error.message.includes('synthetic'));
   assert.equal(outbound.mock.callCount(), 0);
+});
+
+for (const version of ['2.0.24', '2.0.26', '2.1.0']) {
+  test(`регистрация и сервер OpenCode ${version} принимаются диапазоном 2.x`, async (t) => {
+    const host = { ...info, version };
+    const source = await server(t, (req, res) => json(res, req.url === '/api/info' ? host : { output: 'ok' }));
+    await registration(t, { url: source.url, version });
+    const result = await request('/api/rpc/opencode-jobs/list');
+    assert.deepEqual(result, { output: 'ok' });
+  });
+}
+
+test('регистрация без поля версии принимает live 2.x', async (t) => {
+  const source = await server(t, (req, res) => json(res, req.url === '/api/info' ? { ...info, version: '2.0.26' } : { output: 'ok' }));
+  await registration(t, { url: source.url, version: undefined });
+  const result = await request('/api/rpc/opencode-jobs/list');
+  assert.deepEqual(result, { output: 'ok' });
+});
+
+test('регистрация 2.0.22 при живом сервере 2.0.24 отклоняется как несоответствие', async (t) => {
+  const source = await server(t, (_req, res) => json(res, { ...info, version: '2.0.24' }));
+  await registration(t, { url: source.url });
+  await assert.rejects(request('/api/rpc/opencode-jobs/list'), (error) => error.message.includes('не соответствует регистрации'));
+  assert.deepEqual(source.received.map((entry) => entry.url), ['/api/info']);
 });
 
 for (const [name, value, status] of [

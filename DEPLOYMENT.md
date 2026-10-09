@@ -7,7 +7,7 @@ installations require a separately reviewed manual update as described in sectio
 ## 1. Prerequisites
 
 Use the **same user account** for OpenCode and this scheduler. Confirm
-`opencode --version` reports `2.0.22`, `node --version` is at least `20.19`, and
+`opencode --version` reports a 2.x version (`2.0.22` or newer), `node --version` is at least `20.19`, and
 `opencode api get /api/info` reaches the intended local shared server. The plugin
 does not connect to a remote server or install/replace OpenCode.
 

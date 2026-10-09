@@ -1,10 +1,12 @@
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { transformFileAsync } from '@babel/core';
 import solid from 'babel-preset-solid';
 
 await mkdir('dist', { recursive: true });
 const result = await transformFileAsync('src/tui.jsx', { presets: [[solid, { generate: 'universal', moduleName: '@opentui/solid' }]] });
 await writeFile('dist/tui.js', result.code.replace(/(['"])\.\/(contract|job-activity|sanitize)\.js\1/g, '$1../src/$2.js$1') + '\n');
+// Полная замена vendor-копии: cp поверх не удаляет чанки, переименованные при смене версии SDK.
+await rm('vendor/client', { recursive: true, force: true });
 await cp('node_modules/@opencode/client/dist', 'vendor/client', { recursive: true });
 await mkdir('.runtime/package', { recursive: true });
 for (const name of ['src', 'dist', 'vendor']) await cp(name, `.runtime/package/${name}`, { recursive: true });
