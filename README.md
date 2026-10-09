@@ -13,9 +13,10 @@ with the terminal UI closed, provided the machine, shared OpenCode server, and
 local scheduler process are running. It does not automatically replay interrupted
 shell commands or silently execute missed prompts late.
 
-**Version scope:** this checkout describes **0.3.1 preview**, including connection
+**Version scope:** this checkout describes **0.4.0 preview**, adding host-version
+range support and subagent job attribution to connection
 diagnostics, terminal task management, finite job limits and dedicated scheduled-work
-sessions. Connection diagnostics are new since v0.3.0. Existing installations require a reviewed manual update;
+sessions. Existing installations require a reviewed manual update;
 installers refuse to overwrite them.
 
 ## What you can do
@@ -45,7 +46,7 @@ See [task management](docs/operation.md#12-terminal-task-management).
 **Known connection issue:** after changing the managed OpenCode service password
 and restarting the service, an already-open jobs panel can keep using the old
 connection. In 0.3.0, **«Задания: связь потеряна»** can also mean an authorization
-failure while the server and scheduler are healthy. Version 0.3.1 distinguishes
+failure while the server and scheduler are healthy. Since 0.3.1 the interface distinguishes
 authorization, transport, and other request failures. Reopen the same session in a
 new OpenCode client. See [connection warnings and recovery](docs/operation.md#51-connection-warnings-and-recovery)
 for other causes and checks. Clearing the configured service password does not

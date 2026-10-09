@@ -1,6 +1,7 @@
 # Using jobs
 
-This guide describes **0.3.1 preview**, adding connection diagnostics. Its finite limits,
+This guide describes **0.4.0 preview**, adding host-version range support and
+subagent job attribution. Its finite limits,
 dedicated worker sessions, and security hardening are not in the v0.1.0 bundle.
 Existing installations require a separately reviewed manual update.
 
@@ -307,7 +308,7 @@ list-request failures. The **0.3.1** interface distinguishes authorization,
 transport, and other request errors as listed below. These more specific messages
 require an updated installation; the recovery guidance also applies to 0.3.0.
 
-| Situation | Warning in the 0.3.1 interface | Checks and recovery |
+| Situation | Warning since 0.3.1 | Checks and recovery |
 |---|---|---|
 | Server rejects authentication, including a stale client after a service password change | «Задания: ошибка авторизации»; the window explains that the server rejected authentication | Reopen the same existing session in a new OpenCode client. This refreshes the client connection without restarting the service. Do not clear credentials or disable authentication as a workaround |
 | Transport failure or request timeout | «Задания: связь потеряна» | Check `opencode service status` under the same user account. If the intended service is stopped, start it with `opencode service start`. Refresh the task list after connectivity returns; a timeout alone does not prove the service stopped |
@@ -315,7 +316,7 @@ require an updated installation; the recovery guidance also applies to 0.3.0.
 | Server responds but the jobs pump is unhealthy | «Планировщик недоступен» | Inspect the jobs task/service and `pump-status.json` as described below. Direct cancellation remains available through the server |
 
 The output view and an unconfirmed Stop also distinguish request failures in the
-0.3.1 interface. Raw server errors, headers, and credentials are not displayed.
+0.3.1 and later. Raw server errors, headers, and credentials are not displayed.
 Successful list and output reads clear their respective warnings. An error does not trigger
 automatic command replay, service restart, or password changes.
 
