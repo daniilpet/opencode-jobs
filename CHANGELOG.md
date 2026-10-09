@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Accept OpenCode hosts 2.x (2.0.22 or newer) instead of a fixed version list: the
+  contract has stayed stable across 2.0.22-2.0.26, and the registration must still
+  match the live server exactly. A known-broken host version can be blocked
+  individually. Verified hosts: 2.0.22, 2.0.24, 2.0.26 (CI runs isolated
+  integration on each).
+- Pin the build SDK to @opencode/plugin 2.0.24; the single generated client works
+  against supported servers. The build now replaces the vendored client copy
+  instead of merging over stale chunks. On hosts since 2.0.24, a job whose working
+  directory was deleted on disk is observed as a lost shell (HTTP 404), matching
+  the existing recovery reporting.
 - Attribute jobs created inside child sessions (subagents) to the root
   conversation: they appear in its task manager marked with the creating agent,
   results wake the root conversation, and every session of the chain can stop

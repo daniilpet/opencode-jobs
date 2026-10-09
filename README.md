@@ -7,7 +7,8 @@ Persistent, machine-local background jobs for **OpenCode V2** on Windows and Lin
 Run shell commands in the background, watch their output, schedule prompts, and
 receive results in the session that created the job. No OpenCode fork is required.
 
-**Early preview. Tested against OpenCode 2.0.22 only.** The scheduler keeps working
+**Early preview. Runs on OpenCode 2.x (2.0.22 or newer); verified against 2.0.22,
+2.0.24, and 2.0.26.** The scheduler keeps working
 with the terminal UI closed, provided the machine, shared OpenCode server, and
 local scheduler process are running. It does not automatically replay interrupted
 shell commands or silently execute missed prompts late.
@@ -62,7 +63,7 @@ unattended. Never place secrets in command arguments or prompts.
 
 ## Install
 
-Requirements: OpenCode **2.0.22**, Node.js **20.19 or newer**, and an existing
+Requirements: OpenCode **2.x (2.0.22 or newer)**, Node.js **20.19 or newer**, and an existing
 shared OpenCode server configured to remain available without the terminal UI.
 Windows installation requires an elevated PowerShell under the same account as
 OpenCode. Linux installation requires a user systemd service manager; unattended

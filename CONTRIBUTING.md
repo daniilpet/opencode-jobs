@@ -40,7 +40,9 @@ Review Code scanning alerts as well as workflow status. See
 [continuous security checks](SECURITY.md#continuous-security-checks) for failure
 policy, report retention, data sent to the registry, and merge-protection limits.
 
-OpenCode/plugin SDK 2.0.22 and OpenTUI 0.5.14 are pinned to the tested host API.
+OpenCode/plugin SDK 2.0.24 and OpenTUI 0.5.14 are pinned to the tested host API.
+The runtime accepts OpenCode hosts 2.x (2.0.22 or newer) by contract stability;
+verified releases are listed in the changelog.
 Solid and its Babel preset are pinned to 1.9.12 to match OpenTUI's peer requirements.
 Node's 20.19 minimum supports the ES modules, workers, and AbortSignal APIs in use.
 The bundled TUI executes in OpenCode's Bun runtime. Build dependencies may emit
@@ -49,7 +51,7 @@ OpenTUI or undici. Changes to these pins need new compatibility checks.
 
 ## Integration checks
 
-With an installed OpenCode 2.0.22, run `node scripts/smoke.js` after the build.
+With an installed OpenCode 2.x host, run `node scripts/smoke.js` after the build.
 Set `OPENCODE_JOBS_CLI` to the **actual executable** if it is installed elsewhere;
 on Windows this must be the native `.exe`, not an npm `.cmd` shim. Linux needs
 Python 3 for the real terminal task-management check. `npm run test:tui` runs
