@@ -2,7 +2,7 @@
 
 ## Supported scope
 
-The 0.3.1 preview runs on OpenCode 2.x (2.0.22 or newer); versions 2.0.22, 2.0.24,
+The 0.4.0 preview runs on OpenCode 2.x (2.0.22 or newer); versions 2.0.22, 2.0.24,
 and 2.0.26 are verified on Windows and Linux.
 Compatibility and security of newer hosts or unsupported platforms are not
 claimed. Patches will be handled on a best-effort basis; there is no response SLA.

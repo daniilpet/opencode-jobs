@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 - host range and subagent attribution
+
 - Accept OpenCode hosts 2.x (2.0.22 or newer) instead of a fixed version list: the
   contract has stayed stable across 2.0.22-2.0.26, and the registration must still
   match the live server exactly. A known-broken host version can be blocked
