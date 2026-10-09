@@ -108,11 +108,47 @@ that auxiliary directory; `OPENCODE_JOBS_SERVICE_FILE` can select a service
 registration file in a manually supervised setup. Overrides are not supported by
 the preview installers; keep the environment consistent for the server and pump.
 
+### 4.1. Automatic update
+
+Bundles starting with the version that introduces `scripts/update.js` support a
+single-confirmation update:
+
+```sh
+node scripts/update.js --check                          # только диагностика, без изменений
+node scripts/update.js                                  # последний опубликованный релиз
+node scripts/update.js 0.5.0                            # указанная версия
+node scripts/update.js --file opencode-jobs-0.5.0.tar.gz  # офлайн; SHA256SUMS лежит рядом
+```
+
+The updater downloads the release, verifies it against `SHA256SUMS`, refuses to
+run while any job is active or a delivery/result finalization is pending, backs
+up the previous runtime and auxiliary files, replaces only the jobs plugin
+directory, restarts the pump, verifies the installed version and that the
+preserved job state is unchanged, and automatically restores the previous
+runtime if any of these checks fails. Windows shows one UAC confirmation for the
+whole stop-and-start cycle; an automatic rollback asks for a second one. Linux
+uses the user service manager without elevation. The updater never writes the
+OpenCode database and never touches the host, other plugins, or service
+configuration. Backups are kept under
+`${XDG_STATE_HOME:-~/.local/state}/opencode-jobs-backups/`; do not delete the
+backup of the current runtime until the new version has been used. Archive
+listings are checked for absolute paths and parent-directory escapes before
+extraction.
+
+The update command is a local script run by the user. It is intentionally not
+exposed as a model tool.
+
+### 4.2. Manual update and legacy state
+
+The automatic updater talks to the installed plugin: the currently installed
+version must already provide the `preflight` RPC. Running it against an older
+installation fails the readiness check; follow this manual procedure instead.
+
 Do not sync job state or credentials between machines. Do not edit generated
-installed copies independently of this repository. Automatic in-place upgrades
-are not provided in this preview. Before a manual update, review active jobs,
-back up the existing files, stop the pump, and validate the new version in isolation.
-An OpenCode upgrade requires another compatibility check before normal operation.
+installed copies independently of this repository. Before a manual update,
+review active jobs, back up the existing files, stop the pump, and validate the
+new version in isolation. An OpenCode upgrade requires another compatibility
+check before normal operation.
 
 Versions 0.2.0 and later validate saved state before recovery side
 effects. It refuses to load active legacy `background`, `monitor`, or `loop` jobs

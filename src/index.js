@@ -187,6 +187,7 @@ export default {
         const job = await scheduler.cancel(root.sessionID, input.id);
         return { job };
       },
+      preflight: async () => scheduler.updatePreflight(),
     };
 
     await ctx.rpc.register(Jobs, Object.fromEntries(Object.entries(handlers).map(([name, handler]) => [name, async (input, context) => {
