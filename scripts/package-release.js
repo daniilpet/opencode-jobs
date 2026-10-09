@@ -33,7 +33,7 @@ export async function packageRelease(root = process.cwd()) {
     await cp(join(root, item), join(stage, item), { recursive: true });
   }
   await mkdir(join(stage, 'scripts'));
-  for (const script of ['install-windows.ps1', 'install-linux.sh', 'verify-install.js']) await cp(join(root, 'scripts', script), join(stage, 'scripts', script));
+  for (const script of ['install-windows.ps1', 'install-linux.sh', 'verify-install.js', 'update.js', 'update-windows-task.ps1']) await cp(join(root, 'scripts', script), join(stage, 'scripts', script));
   const archive = join(output, `${name}.tar.gz`);
   const result = spawnSync('tar', ['-czf', `${name}.tar.gz`, '-C', 'stage', name], { cwd: output, encoding: 'utf8' });
   if (result.error) throw result.error;

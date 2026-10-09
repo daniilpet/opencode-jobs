@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Add a single-confirmation updater (`scripts/update.js`) shipped in the bundle.
+  It verifies the release checksum and a safe archive listing, refuses to update
+  while jobs are active or deliveries and results are pending, re-checks that
+  gate right before stopping the pump, backs up the previous runtime, replaces
+  only the jobs plugin directory, and automatically rolls back when the installed
+  version or the preserved job state fails verification (Windows: one UAC per
+  stop-and-start cycle, a second one only for a rollback). A new `preflight` RPC
+  exposes the sanitized readiness aggregate this relies on; updating from
+  versions without it still follows the manual procedure.
+
 ## 0.4.0 - host range and subagent attribution
 
 - Accept OpenCode hosts 2.x (2.0.22 or newer) instead of a fixed version list: the

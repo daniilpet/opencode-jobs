@@ -113,6 +113,25 @@ export class Scheduler {
     this.saved = structuredClone(this.state);
   }
 
+  // Агрегат готовности к обновлению: только счётчики и статусы, без команд, промптов и результатов.
+  updatePreflight() {
+    const blockers = {};
+    const statuses = {};
+    let nonTerminal = 0;
+    for (const job of this.state.jobs) {
+      statuses[job.status] = (statuses[job.status] ?? 0) + 1;
+      if (job.status === 'active') {
+        nonTerminal += 1;
+        blockers.active = (blockers.active ?? 0) + 1;
+      }
+      for (const field of ['runMessage', 'stopPending', 'preparing', 'deferredFailure', 'workerResult']) if (job[field]) blockers[field] = (blockers[field] ?? 0) + 1;
+      if (job.messages?.length) blockers.trackedMessages = (blockers.trackedMessages ?? 0) + 1;
+    }
+    const outbox = this.state.outbox.length;
+    if (outbox) blockers.outbox = outbox;
+    return { jobs: this.state.jobs.length, statuses, nonTerminal, outbox, pending: this.outstanding(), blockers, ready: Object.keys(blockers).length === 0 };
+  }
+
   add(sessionID, config, now, directory = '') {
     return this.run(async () => {
       if (!/^ses/.test(sessionID)) throw new Error('Некорректная сессия.');
