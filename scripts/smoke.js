@@ -23,6 +23,7 @@ const agentPrompts = { build: 'Local integration test. Follow the test tool requ
 const statusOutputs = [];
 const toolExchanges = [];
 const hangingWorkers = [];
+const workerReleases = new Map();
 const mock = createServer(async (request, response) => {
   let raw = '';
   for await (const part of request) raw += part;
@@ -42,17 +43,22 @@ const mock = createServer(async (request, response) => {
     response.write(': waiting for the job deadline\n\n');
     return;
   }
-  const marker = /JOBS_SMOKE_TOOL:(background|monitor|jobs|cancel)/.exec(text);
+  const workerRequest = last?.role === 'user' && /JOBS_WORKER_REQUEST:(schedule|loop)/.exec(text);
+  if (workerRequest) await new Promise((done) => workerReleases.set(workerRequest[1], done));
+  const marker = /JOBS_SMOKE_TOOL:(background|monitor|jobs|cancel|schedule|loop)/.exec(text);
   const tool = marker && last.role === 'user' ? body.tools?.find((item) => item.function?.name.endsWith(`opencode_jobs_${marker[1]}`)) : undefined;
   const nativeCommand = text.includes('CHILD_COMPLETION') ? 'node completion-child.cjs' : text.includes('TIMEOUT_CHILD') ? 'node timeout-child.cjs' : text.includes('PARTIAL_OUTPUT') ? 'node partial-child.cjs' : text.includes('DENIED_COMMAND') ? 'echo JOBS_DENIED_COMMAND' : text.includes('CANCEL_LONG') ? (process.platform === 'win32' ? 'Start-Sleep -Seconds 60' : 'sleep 60') : (process.platform === 'win32' ? 'Start-Sleep -Seconds 2; Write-Output OPENCODE_JOBS_SMOKE' : 'sleep 2; echo OPENCODE_JOBS_SMOKE');
-  const argumentsRaw = marker?.[1] === 'jobs' ? '' : marker?.[1] === 'cancel' ? /CANCEL_ID:(job_[a-f0-9-]+)/.exec(text)?.[1] : marker?.[1] === 'monitor' ? `--regex OPENCODE_JOBS_SMOKE --before 0 --after 0 --debounce 1 -- ${nativeCommand}` : nativeCommand;
+  const argumentsRaw = marker?.[1] === 'schedule' ? 'in 2s JOBS_WORKER_REQUEST:schedule' : marker?.[1] === 'loop' ? '10s JOBS_WORKER_REQUEST:loop' : marker?.[1] === 'jobs' ? '' : marker?.[1] === 'cancel' ? /CANCEL_ID:(job_[a-f0-9-]+)/.exec(text)?.[1] : marker?.[1] === 'monitor' ? `--regex OPENCODE_JOBS_SMOKE --before 0 --after 0 --debounce 1 -- ${nativeCommand}` : nativeCommand;
   for (const item of body.messages ?? []) {
     if (item.role !== 'tool' || typeof item.content !== 'string' || !/"jobs":|"job":/.test(item.content)) continue;
     if (!statusOutputs.includes(item.content)) statusOutputs.push(item.content);
   }
   const id = `chatcmpl-${++calls}`;
   const continued = users.includes('JOBS_COMPLETION_PARENT') && text.includes('OpenCode jobs: задание') && text.includes('JOBS_COMPLETION_RESULT');
-  const message = tool ? { role: 'assistant', tool_calls: [{ id: `call-${calls}`, type: 'function', function: { name: tool.function.name, arguments: JSON.stringify({ raw: argumentsRaw, ...(text.includes('TIMEOUT_CHILD') ? { timeout: '5s' } : text.includes('WAIT_TIMEOUT') ? { timeout: '2s' } : {}) }) } }] } : { role: 'assistant', content: continued ? 'PARENT_CONTINUED_AFTER_CHILD_RESULT' : 'SMOKE_READY' };
+  const workerResult = /JOBS_WORKER_RESULT:(schedule|loop)/.exec(text);
+  const workerContinued = workerResult && text.includes('OpenCode jobs: результат задания');
+  const content = workerContinued ? `${users.includes('JOBS_WORKER_CHILD') ? 'CHILD' : 'PARENT'}_CONTINUED_AFTER_${workerResult[1].toUpperCase()}_RESULT` : workerRequest ? `JOBS_WORKER_RESULT:${workerRequest[1]}` : continued ? 'PARENT_CONTINUED_AFTER_CHILD_RESULT' : 'SMOKE_READY';
+  const message = tool ? { role: 'assistant', tool_calls: [{ id: `call-${calls}`, type: 'function', function: { name: tool.function.name, arguments: JSON.stringify({ raw: argumentsRaw, ...(marker[1] === 'loop' ? { maxRuns: 1 } : {}), ...(text.includes('TIMEOUT_CHILD') ? { timeout: '5s' } : text.includes('WAIT_TIMEOUT') ? { timeout: '2s' } : {}) }) } }] } : { role: 'assistant', content };
   const finish = tool ? 'tool_calls' : 'stop';
   toolExchanges.push({ last, response: message });
   const usage = { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 };
@@ -156,6 +162,39 @@ try {
   const registeredAgain = await rpc('attach', { sessionID: completionChild.id, id: childJob.id, shellID: childJob.shellID });
   assert.equal(registeredAgain.job.ended, observedCompletion.ended, 'late duplicate registration preserves the observed completion');
   process.stdout.write('PASS child returns before command completion; result wakes parent without a user prompt\n');
+  for (const kind of ['schedule', 'loop']) {
+    const parent = data(await api('/api/session', 'POST', { title: `Jobs ${kind} parent`, location: { directory: workdir }, agent: 'build', model: { providerID: 'smoke', id: 'smoke' } }));
+    await api(`/api/session/${parent.id}/prompt`, 'POST', { text: 'JOBS_WORKER_PARENT\nJOBS_SMOKE_AGENT:build' });
+    await api(`/api/experimental/session/${parent.id}/wait`, 'POST', {});
+    const child = data(await api('/api/session', 'POST', { parentID: parent.id, title: `Jobs ${kind} creator`, location: { directory: workdir }, agent: 'build', model: { providerID: 'smoke', id: 'smoke' } }));
+    await api(`/api/session/${child.id}/prompt`, 'POST', { text: `JOBS_SMOKE_TOOL:${kind}\nJOBS_WORKER_CHILD\nJOBS_SMOKE_AGENT:build` });
+    await api(`/api/experimental/session/${child.id}/wait`, 'POST', {});
+    const created = (await rpc('list', { sessionID: parent.id })).jobs.find((item) => item.createdBy === child.id);
+    assert.equal(created.kind, kind);
+    assert.ok(data(await api(`/api/session/${child.id}/context`)).some((item) => JSON.stringify(item).includes('SMOKE_READY')), 'creator returned before the held worker result');
+    await until(() => workerReleases.has(kind), `${kind} worker request held after creator returned`);
+    workerReleases.get(kind)();
+    const parentMarker = `PARENT_CONTINUED_AFTER_${kind.toUpperCase()}_RESULT`;
+    const childMarker = `CHILD_CONTINUED_AFTER_${kind.toUpperCase()}_RESULT`;
+    const parentContext = await until(async () => {
+      const context = data(await api(`/api/session/${parent.id}/context`));
+      return context.some((item) => JSON.stringify(item).includes(parentMarker)) && context;
+    }, `${kind} result automatically resumes parent`);
+    const childContext = await until(async () => {
+      const context = data(await api(`/api/session/${child.id}/context`));
+      return context.some((item) => JSON.stringify(item).includes(childMarker)) && context;
+    }, `${kind} result automatically resumes creator`);
+    assert.ok(JSON.stringify(parentContext).includes(created.id));
+    assert.ok(JSON.stringify(childContext).includes(created.id));
+    assert.equal(toolExchanges.filter((item) => item.response.content === parentMarker).length, 1);
+    assert.equal(toolExchanges.filter((item) => item.response.content === childMarker).length, 1);
+    const finished = (await rpc('list', { sessionID: parent.id })).jobs.find((item) => item.id === created.id);
+    assert.notEqual(finished.workerID, parent.id);
+    assert.notEqual(finished.workerID, child.id);
+    assert.equal(finished.executionStatus, 'succeeded');
+    await rpc('cancel', { sessionID: parent.id, id: created.id });
+    process.stdout.write(`PASS ${kind} result wakes parent and creator without another user prompt\n`);
+  }
   await api(`/api/session/${sessionID}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background CANCEL_LONG\nJOBS_SMOKE_AGENT:build' });
   const cancelShell = await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.kind === 'background' && item.status === 'active' && item.shellID), 'native cancellable shell');
   await rpc('cancel', { sessionID, id: cancelShell.id });
@@ -319,7 +358,7 @@ try {
   }
   await writeFile(join(root, 'guidance-report.json'), JSON.stringify({ ok: true, requests: guidanceRequests.map(({ agent, tools, originalPromptPreserved }) => ({ agent, tools: tools.filter((name) => name.startsWith('opencode_jobs_')), originalPromptPreserved, guidanceMatchesTools: true })), limitation: 'Mock provider verifies prompt delivery, not real-model tool selection.' }, null, 2));
   process.stdout.write('PASS native guidance delivery, original role prompts and permission-filtered tools\n');
-  await writeFile(join(root, 'report.json'), JSON.stringify({ ok: true, platform: process.platform, sessionID, mockCalls: calls, checks: ['plugin', 'commands', 'native background', 'native monitor notification', 'subagent background completion wakes parent without user prompt', 'native shell cancel', 'cancel-before-attach race', 'shell permission deny', 'specific-command denial', 'ask/reject without spawn', 'approval deadline and late approval rejection', 'cancel pending approval without spawn', 'safe jobs/cancel output', 'native timeout without pump and actual child termination', 'dedicated worker and parent result delivery', 'nested job denial', 'worker deadline without pump', 'parent independence', 'terminal worker dispatch denial', 'guidance delivery and original prompts', 'permission-filtered guidance', 'no-tools guidance omitted', 'schedule', 'finite loop count', 'cancel', 'restart persistence', 'interrupted shell failure without replay', 'missed deadline'] }, null, 2));
+  await writeFile(join(root, 'report.json'), JSON.stringify({ ok: true, platform: process.platform, sessionID, mockCalls: calls, checks: ['plugin', 'commands', 'native background', 'native monitor notification', 'subagent background completion wakes parent without user prompt', 'subagent schedule result wakes parent and creator without user prompt', 'subagent loop result wakes parent and creator without user prompt', 'native shell cancel', 'cancel-before-attach race', 'shell permission deny', 'specific-command denial', 'ask/reject without spawn', 'approval deadline and late approval rejection', 'cancel pending approval without spawn', 'safe jobs/cancel output', 'native timeout without pump and actual child termination', 'dedicated worker and parent result delivery', 'nested job denial', 'worker deadline without pump', 'parent independence', 'terminal worker dispatch denial', 'guidance delivery and original prompts', 'permission-filtered guidance', 'no-tools guidance omitted', 'schedule', 'finite loop count', 'cancel', 'restart persistence', 'interrupted shell failure without replay', 'missed deadline'] }, null, 2));
   process.stdout.write(`PASS isolated integration. Artifacts: ${root}\n`);
 } catch (error) {
   await writeFile(join(root, 'server.log'), logs);

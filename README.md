@@ -113,6 +113,9 @@ This project is not published to npm.
   jobs, subagents, and native background shell are disabled in worker sessions.
   This is not a real-time scheduler or an operating-system sandbox. Third-party
   tools that ignore cancellation are outside the execution-limit guarantee.
+- In the unreleased source, subagent schedules and loops return results and
+  confirmed failures to both the root and the creating child. Both notifications
+  can wake models and incur provider costs; they authorize no new work.
 - Legacy unbounded active jobs and old scheduled-prompt deliveries can block
   loading. Review the [manual update requirements](DEPLOYMENT.md#4-state-and-updates)
   before replacing an existing installation.

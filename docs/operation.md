@@ -74,6 +74,11 @@ owned shell or worker is stopped, and its pending deliveries are cancelled. No o
 notification is added. `/jobs` retains the reason. A failed cleanup remains
 visible as `stopPending: true` with `untrusted.cleanupError`; subsequent ticks
 retry cleanup only. The original command or prompt is never relaunched.
+The unreleased subagent-worker notification path is an exception: a confirmed
+result or failure waits durably for room for both recipients, and outstanding
+copies of a completed loop iteration coalesce later ticks rather than being
+discarded at a full queue. The 100-message limit still applies; see
+[Understand delivery](#2-understand-delivery).
 
 ### 1.1. Model tool selection
 
@@ -153,6 +158,8 @@ Press `Ctrl+X` or click **Остановить** to stop the selected job. This 
 existing cancellation operation directly, without asking a model. Stopping a loop
 also cancels future iterations. An already-produced loop result remains queued for
 delivery to the parent session when the user cancels the loop.
+In the unreleased source, a subagent's produced loop result is also retained for
+its original creating child, including that recipient's delivery route.
 **Останавливается** means cleanup is still pending; it does not claim that the
 process has already stopped. A confirmed worker result
 awaiting finalization is shown as **Завершается** and cannot be discarded by Stop.
@@ -211,6 +218,26 @@ wakes its model. Processing that notification has its own provider costs and
 belongs to the original conversation, outside the job-session execution budget.
 The full worker history is retained for inspection.
 
+In the unreleased source, `schedule` and `loop` jobs created by a subagent also
+deliver results and confirmed failure, missed-deadline, and expiry notifications
+to the original creating child. Root attribution and the separate worker fork
+remain unchanged. Each recipient has its own stable admission ID in the existing
+outbox, and both use `resume: true`. A partial delivery failure retains the pending
+copy, leaves a diagnostic identifying its recipient, and does not replay the
+worker request. The root can receive its copy even if the child is unavailable;
+no replacement child session is created automatically. Pending recipient copies
+continue to coalesce loop ticks. Delivery status remains pending or failed until
+all queued copies are accepted; acceptance still does not prove a model response.
+
+The queue reserves room for both notifications before enqueueing either. If the
+100-message limit leaves insufficient room, an observed successful result remains
+saved for finalization and a confirmed failure remains deferred until space is
+available. No new loop iteration starts while that finalization is pending.
+Each notification may incur provider costs outside the completed worker budget.
+Waking both models does not guarantee that their subsequent actions are distinct;
+notifications are data, not new authorization. No historical terminal results are
+retroactively sent to children. See [ADR 0004](adr/0004-subagent-shell-completion.md).
+
 Cancellation removes future delivery attempts and owned queued messages, aborts
 pending shell approval, and interrupts the owned job session or shell process.
 It does not interrupt the original conversation's processing of a result already
@@ -249,6 +276,10 @@ to the parent session while removing pending worker prompts. The stored format
 does not distinguish the types of already-accepted parent notifications, so those
 notifications are retained together. Active-job deadline and queue-overflow cleanup
 retain their existing cancellation policy. See [ADR 0003](adr/0003-session-task-management.md).
+For subagent loops in the unreleased source, the same cancellation preservation
+also covers the original child's produced result and accepted notifications;
+worker routes are still removed. Cancelling before a result is observed does not
+request continuation of the cancelled work.
 
 ## 3. Recovery
 

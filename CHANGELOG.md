@@ -10,6 +10,13 @@
   owner after cleanup. Root-launched commands retain native completion without
   a second plugin notification; explicit cancellation does not resume the task.
 
+- Deliver subagent `schedule`/`loop` results and confirmed failure notifications to
+  both the root conversation and the original creating child, waking each with
+  separate durable admission IDs. Partial delivery failures do not hide behind a
+  successful recipient or repeat worker execution. Preserve produced loop results
+  and recipient routes during cancellation. Wait durably for room for both
+  notifications without increasing the 100-message limit.
+
 - Add a single-confirmation updater (`scripts/update.js`) shipped in the bundle.
   It verifies the release checksum and a safe archive listing, refuses to update
   while jobs are active or deliveries and results are pending, re-checks that

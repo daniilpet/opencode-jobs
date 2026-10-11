@@ -4,6 +4,12 @@ import { jobLimits } from './limits.js';
 import { sanitize } from './sanitize.js';
 
 const isSubagentBackground = (job) => job.kind === 'background' && Boolean(job.createdBy && job.createdBy !== job.sessionID);
+const isSubagentWorker = (job) => ['schedule', 'loop'].includes(job.kind) && Boolean(job.createdBy && job.createdBy !== job.sessionID);
+
+// result/failure schedule/loop: событие × создатель-ребёнок: 00/01 -> наблюдать;
+// 10 -> root, 11 -> root и исходный createdBy. Prompt всегда адресован только worker.
+// Background сохраняет native child + plugin root; monitor не расширяется.
+const deliverySessions = (job, type) => type === 'prompt' ? [job.workerID] : isSubagentWorker(job) && ['result', 'failure'].includes(type) ? [job.sessionID, job.createdBy] : [job.sessionID];
 
 // Матрица восстановления: срок в будущем -> оставить; срок прошёл -> missed;
 // shell launching/running -> interrupted без повторного запуска;
@@ -221,15 +227,16 @@ export class Scheduler {
     }
   }
 
-  // cancelled × подтверждённый worker loop × родительская доставка:
-  // 111 -> сохранить result в outbox или принятое уведомление родителю;
+  // cancelled × подтверждённый worker loop × доставка root/исходному createdBy:
+  // 111 -> сохранить result в outbox или принятое уведомление адресату;
   // остальные сочетания -> обычная отмена доставки. Тип принятого сообщения не хранится.
   // runMessage и маршруты к worker всегда снимаются; legacy без worker не выводим из defaults.
   keepCancelledResult(job, id) {
     if (job.status !== 'cancelled' || job.kind !== 'loop' || job.executionMode !== 'worker' || !job.workerID || id === job.runMessage) return false;
+    const sessions = deliverySessions(job, 'result');
     const entry = this.state.outbox.find((item) => item.jobID === job.id && item.id === id);
-    if (entry) return entry.type === 'result' && entry.sessionID === job.sessionID;
-    return Boolean(job.messages?.includes(id) && (job.messageSessions?.[id] ?? job.sessionID) === job.sessionID);
+    if (entry) return entry.type === 'result' && sessions.includes(entry.sessionID);
+    return Boolean(job.messages?.includes(id) && sessions.includes(job.messageSessions?.[id] ?? job.sessionID));
   }
 
   async stop(job, status, reason, now, notify = false) {
@@ -256,7 +263,10 @@ export class Scheduler {
         if (await this.io.isPending(sessionID, id)) await this.io.cancelDelivery(sessionID, id);
       }
       job.messages = retained;
-      delete job.messageSessions;
+      if (job.messageSessions) {
+        job.messageSessions = Object.fromEntries(Object.entries(job.messageSessions).filter(([id]) => retained.includes(id)));
+        if (!Object.keys(job.messageSessions).length) delete job.messageSessions;
+      }
       delete job.runMessage;
       delete job.workerResult;
       delete job.preparing;
@@ -272,21 +282,28 @@ export class Scheduler {
 
   // Уведомления задания субагента помечают источник; запросы worker-а - нет.
   enqueue(job, text, type, now) {
-    if (this.outstanding() >= 100) throw new Error('Очередь заданий переполнена; требуется восстановить доставку.');
-    const id = `msg_jobs_${job.id.slice(4).replaceAll('-', '')}_${++job.sequence}`;
-    const sessionID = type === 'prompt' ? job.workerID : job.sessionID;
+    const sessions = deliverySessions(job, type);
+    if (this.outstanding() + sessions.length > 100) throw new Error('Очередь заданий переполнена; требуется восстановить доставку.');
     if (type !== 'prompt' && job.createdBy && job.createdBy !== job.sessionID) text = `Задание субагента${job.createdByTitle ? ` "${sanitize(job.createdByTitle).replace(/\s+/g, ' ').trim()}"` : ''}: ${text}`;
-    const entry = { id, jobID: job.id, sessionID, type, text, created: now, due: job.due ?? now, coalesced: job.coalesced };
-    if (sessionID !== job.sessionID) (job.messageSessions ??= {})[id] = sessionID;
-    this.state.outbox.push(entry);
-    job.lastMessage = id;
-    (job.messages ??= []).push(id);
+    const entries = sessions.map((sessionID) => {
+      const id = `msg_jobs_${job.id.slice(4).replaceAll('-', '')}_${++job.sequence}`;
+      const entry = { id, jobID: job.id, sessionID, type, text, created: now, due: job.due ?? now, coalesced: job.coalesced };
+      if (sessionID !== job.sessionID) (job.messageSessions ??= {})[id] = sessionID;
+      this.state.outbox.push(entry);
+      job.lastMessage = id;
+      (job.messages ??= []).push(id);
+      return entry;
+    });
     job.delivery = 'pending';
-    return entry;
+    return entries[0];
   }
 
   failure(job, reason, now) {
     job.error = reason;
+    if (isSubagentWorker(job) && this.outstanding() + deliverySessions(job, 'failure').length > 100) {
+      job.deferredFailure = { reason, now };
+      return;
+    }
     if (this.outstanding() >= 100) {
       job.status = 'failed';
       job.error = 'Достигнут предел 100 ожидающих сообщений. Задание остановлено.';
@@ -379,7 +396,7 @@ export class Scheduler {
           await this.stop(job, 'failed', `Сессия задания ${job.workerID} завершилась: ${result.status}. Повторное исполнение не выполнено.`, now, true);
           continue;
         }
-        if (this.outstanding() >= 100) {
+        if (this.outstanding() >= 100 && !isSubagentWorker(job)) {
           await this.stop(job, 'failed', 'Достигнут предел 100 ожидающих сообщений. Задание остановлено.', now);
           continue;
         }
@@ -387,6 +404,9 @@ export class Scheduler {
           job.workerResult = { status: 'succeeded', text: sanitize(result.text ?? '').slice(-8000) };
           await this.persist();
         }
+        // Свободных мест достаточно × result уже сохранён: 11 -> полная рассылка;
+        // 01 -> durable ожидание без удаления runMessage и без нового исполнения.
+        if (this.outstanding() + deliverySessions(job, 'result').length > 100) continue;
         const expired = job.expiresAt <= (this.io.now?.() ?? now);
         if (job.status === 'completed' || expired) await this.io.stopWorker(job);
         if (expired && job.status === 'active') job.status = 'expired';
@@ -443,12 +463,16 @@ export class Scheduler {
           job.runs++;
           if (job.runs >= job.maxRuns) job.status = 'completed';
         }
-        job.delivery = 'sent';
-        delete job.deliveryError;
+        if (isSubagentWorker(job) && this.state.outbox.some((item) => item.jobID === job.id)) job.delivery = job.deliveryError ? 'failed' : 'pending';
+        else {
+          job.delivery = 'sent';
+          delete job.deliveryError;
+        }
       } catch (error) {
         this.assertActive();
         job.delivery = 'failed';
-        job.deliveryError = error instanceof Error ? error.message : String(error);
+        const reason = error instanceof Error ? error.message : String(error);
+        job.deliveryError = isSubagentWorker(job) ? `Доставка в сессию ${entry.sessionID}: ${reason}` : reason;
       }
       await this.persist();
     }
@@ -474,7 +498,7 @@ export class Scheduler {
           }
         }
         job.messages = retained;
-        if (job.deferredFailure && !job.stopPending && this.outstanding() < 100) {
+        if (job.deferredFailure && !job.stopPending && this.outstanding() + deliverySessions(job, 'failure').length <= 100) {
           const deferred = job.deferredFailure;
           delete job.deferredFailure;
           this.failure(job, deferred.reason, deferred.now);
@@ -483,7 +507,11 @@ export class Scheduler {
       await this.observeWorkers(now);
       for (const job of this.state.jobs) {
         if (job.status !== 'active' || !['loop', 'schedule'].includes(job.kind) || job.due > now) continue;
-        if (this.outstanding() >= 100) {
+        if (isSubagentWorker(job) && (job.workerResult || job.deferredFailure)) continue;
+        const pending = this.state.outbox.some((entry) => entry.jobID === job.id) || job.messages?.length;
+        // Полная очередь × завершённая итерация child loop с pending result:
+        // 11 -> coalesce без удаления результата; остальные случаи сохраняют overflow policy.
+        if (this.outstanding() >= 100 && !(isSubagentWorker(job) && !job.runMessage && pending)) {
           await this.stop(job, 'failed', 'Достигнут предел 100 ожидающих сообщений. Задание остановлено.', now);
           continue;
         }
@@ -496,7 +524,6 @@ export class Scheduler {
           this.miss(job, now);
           continue;
         }
-        const pending = this.state.outbox.some((entry) => entry.jobID === job.id) || job.messages?.length;
         if (job.kind === 'loop' && pending) {
           job.coalesced++;
         } else {
