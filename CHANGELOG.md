@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Deliver observed subagent `background` completion to the owning conversation
+  through the existing durable outbox and wake its model without a user prompt.
+  Include the actual status, exit code and up to 8,000 characters of redacted,
+  untrusted output. Preserve this result across delivery failures, restart and
+  the completed command's deadline. Subagent background expiry also notifies the
+  owner after cleanup. Root-launched commands retain native completion without
+  a second plugin notification; explicit cancellation does not resume the task.
+
 - Add a single-confirmation updater (`scripts/update.js`) shipped in the bundle.
   It verifies the release checksum and a safe archive listing, refuses to update
   while jobs are active or deliveries and results are pending, re-checks that

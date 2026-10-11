@@ -5,7 +5,8 @@
 
 Persistent, machine-local background jobs for **OpenCode V2** on Windows and Linux.
 Run shell commands in the background, watch their output, schedule prompts, and
-receive results in the session that created the job. No OpenCode fork is required.
+receive results in the owning conversation, including jobs launched by its subagents.
+No OpenCode fork is required.
 
 **Early preview. Runs on OpenCode 2.x (2.0.22 or newer); verified against 2.0.22,
 2.0.24, and 2.0.26.** The scheduler keeps working

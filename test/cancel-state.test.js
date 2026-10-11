@@ -56,10 +56,10 @@ for (const config of [
 test('завершение shell в очереди перед cancel сохраняет точный результат и уведомление', async () => {
   const f = fixture();
   await f.scheduler.load(0);
-  const job = await f.scheduler.add('ses_owner', { kind: 'background', command: 'fixture' }, 0);
+  const job = await f.scheduler.add('ses_owner', { kind: 'background', command: 'fixture', createdBy: 'ses_child' }, 0);
   await f.scheduler.attach('ses_owner', job.id, 'sh_owned', 1);
 
-  const completion = f.scheduler.consume('ses_owner', job.id, { status: 'completed', ended: 20, exitCode: 0, cursor: 4 }, 'RESULT', 20);
+  const completion = f.scheduler.consume('ses_owner', job.id, { status: 'completed', ended: 20, exit: 0, cursor: 4, completionOutput: 'RESULT' }, undefined, 20);
   const cancellation = f.scheduler.cancel('ses_owner', job.id);
   await completion;
   const before = structuredClone(f.saved());

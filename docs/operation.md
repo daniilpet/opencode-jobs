@@ -215,15 +215,40 @@ Cancellation removes future delivery attempts and owned queued messages, aborts
 pending shell approval, and interrupts the owned job session or shell process.
 It does not interrupt the original conversation's processing of a result already
 consumed there, or roll back side effects. Native shell completion messages are
-provided by OpenCode; the plugin does not duplicate them.
+provided by OpenCode to the session that launched the shell. For root-launched
+background commands, the plugin does not duplicate them.
+
+In the unreleased source, a subagent's `background` command also sends its observed
+terminal outcome to the owning conversation through the existing durable outbox,
+with `resume: true`. That conversation can continue its previously agreed work
+without another user prompt, even when the subagent already returned its answer.
+The notification identifies the job, actual status and exit code, and includes a
+redacted tail of at most 8,000 characters. The terminal capture is read as one
+bounded window before redaction so a page boundary does not split a recognized
+token. Raw output is not added to the plugin's saved state. Output
+is explicitly untrusted data, not new instructions or authorization. Error and
+expiry notifications do not retry the command. Explicit cancellation retains its
+existing cleanup policy and does not request continuation of the cancelled work.
+
+Observed terminal results remain deliverable after the command's deadline and
+across restart; retries retain the same admission ID. Reattaching the same shell
+to a terminal subagent background job preserves its result without cleanup.
+An active subagent background job reaching its deadline reports expiry after
+cleanup. A read/transport failure
+does not establish successful completion or result processing. The machine,
+OpenCode server and pump must remain available; provider failures and inbox order
+can delay the receiving model. Monitor matches continue to use their existing
+delivery policy. Direct native background shell outside jobs is not registered or
+forwarded by this plugin. Existing terminal history is not replayed, and legacy
+jobs lacking root attribution are not migrated. See [ADR 0004](adr/0004-subagent-shell-completion.md).
 
 Starting with v0.3.0, late cancellation preserves a
 terminal outcome already observed by the scheduler. Cancelling a modern worker
 loop also retains its produced result in the outbox and accepted notifications
 to the parent session while removing pending worker prompts. The stored format
 does not distinguish the types of already-accepted parent notifications, so those
-notifications are retained together. Deadline and queue-overflow cleanup retain
-their existing cancellation policy. See [ADR 0003](adr/0003-session-task-management.md).
+notifications are retained together. Active-job deadline and queue-overflow cleanup
+retain their existing cancellation policy. See [ADR 0003](adr/0003-session-task-management.md).
 
 ## 3. Recovery
 

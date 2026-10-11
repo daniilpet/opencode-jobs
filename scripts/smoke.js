@@ -44,14 +44,15 @@ const mock = createServer(async (request, response) => {
   }
   const marker = /JOBS_SMOKE_TOOL:(background|monitor|jobs|cancel)/.exec(text);
   const tool = marker && last.role === 'user' ? body.tools?.find((item) => item.function?.name.endsWith(`opencode_jobs_${marker[1]}`)) : undefined;
-  const nativeCommand = text.includes('TIMEOUT_CHILD') ? 'node timeout-child.cjs' : text.includes('PARTIAL_OUTPUT') ? 'node partial-child.cjs' : text.includes('DENIED_COMMAND') ? 'echo JOBS_DENIED_COMMAND' : text.includes('CANCEL_LONG') ? (process.platform === 'win32' ? 'Start-Sleep -Seconds 60' : 'sleep 60') : (process.platform === 'win32' ? 'Start-Sleep -Seconds 2; Write-Output OPENCODE_JOBS_SMOKE' : 'sleep 2; echo OPENCODE_JOBS_SMOKE');
+  const nativeCommand = text.includes('CHILD_COMPLETION') ? 'node completion-child.cjs' : text.includes('TIMEOUT_CHILD') ? 'node timeout-child.cjs' : text.includes('PARTIAL_OUTPUT') ? 'node partial-child.cjs' : text.includes('DENIED_COMMAND') ? 'echo JOBS_DENIED_COMMAND' : text.includes('CANCEL_LONG') ? (process.platform === 'win32' ? 'Start-Sleep -Seconds 60' : 'sleep 60') : (process.platform === 'win32' ? 'Start-Sleep -Seconds 2; Write-Output OPENCODE_JOBS_SMOKE' : 'sleep 2; echo OPENCODE_JOBS_SMOKE');
   const argumentsRaw = marker?.[1] === 'jobs' ? '' : marker?.[1] === 'cancel' ? /CANCEL_ID:(job_[a-f0-9-]+)/.exec(text)?.[1] : marker?.[1] === 'monitor' ? `--regex OPENCODE_JOBS_SMOKE --before 0 --after 0 --debounce 1 -- ${nativeCommand}` : nativeCommand;
   for (const item of body.messages ?? []) {
     if (item.role !== 'tool' || typeof item.content !== 'string' || !/"jobs":|"job":/.test(item.content)) continue;
     if (!statusOutputs.includes(item.content)) statusOutputs.push(item.content);
   }
   const id = `chatcmpl-${++calls}`;
-  const message = tool ? { role: 'assistant', tool_calls: [{ id: `call-${calls}`, type: 'function', function: { name: tool.function.name, arguments: JSON.stringify({ raw: argumentsRaw, ...(text.includes('TIMEOUT_CHILD') ? { timeout: '5s' } : text.includes('WAIT_TIMEOUT') ? { timeout: '2s' } : {}) }) } }] } : { role: 'assistant', content: 'SMOKE_READY' };
+  const continued = users.includes('JOBS_COMPLETION_PARENT') && text.includes('OpenCode jobs: задание') && text.includes('JOBS_COMPLETION_RESULT');
+  const message = tool ? { role: 'assistant', tool_calls: [{ id: `call-${calls}`, type: 'function', function: { name: tool.function.name, arguments: JSON.stringify({ raw: argumentsRaw, ...(text.includes('TIMEOUT_CHILD') ? { timeout: '5s' } : text.includes('WAIT_TIMEOUT') ? { timeout: '2s' } : {}) }) } }] } : { role: 'assistant', content: continued ? 'PARENT_CONTINUED_AFTER_CHILD_RESULT' : 'SMOKE_READY' };
   const finish = tool ? 'tool_calls' : 'stop';
   toolExchanges.push({ last, response: message });
   const usage = { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 };
@@ -108,6 +109,7 @@ const data = (value) => value?.data ?? value;
 try {
   await writeFile(join(workdir, 'timeout-child.cjs'), "process.stdout.write('JOBS_CHILD_PID=' + process.pid + '\\n'); setInterval(() => {}, 1000);\n");
   await writeFile(join(workdir, 'partial-child.cjs'), "process.stdout.write('token=FIXTURE_PARTIAL_SECRET'); setInterval(() => {}, 1000);\n");
+  await writeFile(join(workdir, 'completion-child.cjs'), "const { existsSync } = require('node:fs'); process.stdout.write('JOBS_COMPLETION_STARTED sk-abcdefghijklmnopqrst'); const timer = setInterval(() => { if (existsSync('completion-release')) { clearInterval(timer); process.stdout.write('uvwxyz0123456789\\nJOBS_COMPLETION_RESULT token=FIXTURE_COMPLETION_SECRET\\n'); } }, 100);\n");
   start();
   endpoint = await until(() => Service.discover({ file: registration }), 'isolated server startup');
   await writeFile(join(root, 'config-discovery.json'), JSON.stringify(await api('/api/config', 'GET', undefined, workdir), null, 2));
@@ -131,6 +133,29 @@ try {
     if (name === 'monitor') await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.id === job.id && item.delivery === 'sent'), 'monitor match notification');
     process.stdout.write(`PASS native ${name}\n`);
   }
+  const completionParent = data(await api('/api/session', 'POST', { title: 'Jobs completion parent', location: { directory: workdir }, agent: 'build', model: { providerID: 'smoke', id: 'smoke' } }));
+  await api(`/api/session/${completionParent.id}/prompt`, 'POST', { text: 'JOBS_COMPLETION_PARENT\nJOBS_SMOKE_AGENT:build' });
+  await api(`/api/experimental/session/${completionParent.id}/wait`, 'POST', {});
+  const completionChild = data(await api('/api/session', 'POST', { parentID: completionParent.id, title: 'Jobs completion child', location: { directory: workdir }, agent: 'build', model: { providerID: 'smoke', id: 'smoke' } }));
+  await api(`/api/session/${completionChild.id}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background CHILD_COMPLETION\nJOBS_SMOKE_AGENT:build' });
+  await api(`/api/experimental/session/${completionChild.id}/wait`, 'POST', {});
+  const childJob = (await rpc('list', { sessionID: completionParent.id })).jobs.find((item) => item.createdBy === completionChild.id);
+  assert.ok(childJob?.shellID, 'child returned after launching an attributed background job');
+  assert.equal(data(await api(`/api/shell/${childJob.shellID}`, 'GET', undefined, workdir)).status, 'running', 'child response completed before the actual command');
+  assert.ok(data(await api(`/api/session/${completionChild.id}/context`)).some((item) => JSON.stringify(item).includes('SMOKE_READY')), 'child returned its intermediate answer');
+  await until(async () => (await rpc('list', { sessionID: completionParent.id })).jobs.some((item) => item.id === childJob.id && item.cursor > 0), 'first output page observed before completing the synthetic token');
+  await writeFile(join(workdir, 'completion-release'), 'release synthetic command\n');
+  const resumed = await until(async () => {
+    const context = data(await api(`/api/session/${completionParent.id}/context`));
+    return context.some((item) => JSON.stringify(item).includes('PARENT_CONTINUED_AFTER_CHILD_RESULT')) && context;
+  }, 'parent model continued automatically after child command completion');
+  assert.ok(JSON.stringify(resumed).includes(childJob.id), 'parent received the actual job identity');
+  assert.doesNotMatch(JSON.stringify(resumed), /FIXTURE_COMPLETION_SECRET|abcdefghijklmnopqrst|uvwxyz0123456789/);
+  assert.equal(toolExchanges.filter((item) => item.response.content === 'PARENT_CONTINUED_AFTER_CHILD_RESULT').length, 1, 'one parent continuation without another user prompt');
+  const observedCompletion = (await rpc('list', { sessionID: completionParent.id })).jobs.find((item) => item.id === childJob.id);
+  const registeredAgain = await rpc('attach', { sessionID: completionChild.id, id: childJob.id, shellID: childJob.shellID });
+  assert.equal(registeredAgain.job.ended, observedCompletion.ended, 'late duplicate registration preserves the observed completion');
+  process.stdout.write('PASS child returns before command completion; result wakes parent without a user prompt\n');
   await api(`/api/session/${sessionID}/prompt`, 'POST', { text: 'JOBS_SMOKE_TOOL:background CANCEL_LONG\nJOBS_SMOKE_AGENT:build' });
   const cancelShell = await until(async () => (await rpc('list', { sessionID })).jobs.find((item) => item.kind === 'background' && item.status === 'active' && item.shellID), 'native cancellable shell');
   await rpc('cancel', { sessionID, id: cancelShell.id });
@@ -294,7 +319,7 @@ try {
   }
   await writeFile(join(root, 'guidance-report.json'), JSON.stringify({ ok: true, requests: guidanceRequests.map(({ agent, tools, originalPromptPreserved }) => ({ agent, tools: tools.filter((name) => name.startsWith('opencode_jobs_')), originalPromptPreserved, guidanceMatchesTools: true })), limitation: 'Mock provider verifies prompt delivery, not real-model tool selection.' }, null, 2));
   process.stdout.write('PASS native guidance delivery, original role prompts and permission-filtered tools\n');
-  await writeFile(join(root, 'report.json'), JSON.stringify({ ok: true, platform: process.platform, sessionID, mockCalls: calls, checks: ['plugin', 'commands', 'native background', 'native monitor notification', 'native shell cancel', 'cancel-before-attach race', 'shell permission deny', 'specific-command denial', 'ask/reject without spawn', 'approval deadline and late approval rejection', 'cancel pending approval without spawn', 'safe jobs/cancel output', 'native timeout without pump and actual child termination', 'dedicated worker and parent result delivery', 'nested job denial', 'worker deadline without pump', 'parent independence', 'terminal worker dispatch denial', 'guidance delivery and original prompts', 'permission-filtered guidance', 'no-tools guidance omitted', 'schedule', 'finite loop count', 'cancel', 'restart persistence', 'interrupted shell failure without replay', 'missed deadline'] }, null, 2));
+  await writeFile(join(root, 'report.json'), JSON.stringify({ ok: true, platform: process.platform, sessionID, mockCalls: calls, checks: ['plugin', 'commands', 'native background', 'native monitor notification', 'subagent background completion wakes parent without user prompt', 'native shell cancel', 'cancel-before-attach race', 'shell permission deny', 'specific-command denial', 'ask/reject without spawn', 'approval deadline and late approval rejection', 'cancel pending approval without spawn', 'safe jobs/cancel output', 'native timeout without pump and actual child termination', 'dedicated worker and parent result delivery', 'nested job denial', 'worker deadline without pump', 'parent independence', 'terminal worker dispatch denial', 'guidance delivery and original prompts', 'permission-filtered guidance', 'no-tools guidance omitted', 'schedule', 'finite loop count', 'cancel', 'restart persistence', 'interrupted shell failure without replay', 'missed deadline'] }, null, 2));
   process.stdout.write(`PASS isolated integration. Artifacts: ${root}\n`);
 } catch (error) {
   await writeFile(join(root, 'server.log'), logs);

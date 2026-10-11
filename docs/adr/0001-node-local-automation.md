@@ -63,7 +63,10 @@ conversation, and the original conversation is never interrupted for migration.
 
 This is not hard real-time scheduling. Late ticks over five seconds become misses;
 the model can start later due to inbox order, provider failure, or permissions.
-Native background-shell completion is not duplicated. Native executor delegation
+Root-launched native background-shell completion is not duplicated. The unreleased
+[ADR 0004](0004-subagent-shell-completion.md) adds delivery to the owning conversation
+for subagent background jobs, whose native notification targets a different session.
+Native executor delegation
 does not replay before/after hooks under the original shell tool name.
 
 Monitoring uses combined stdout/stderr, a bounded regex worker, framed output,
