@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.0 - updater and subagent completion
+
 - Deliver observed subagent `background` completion to the owning conversation
   through the existing durable outbox and wake its model without a user prompt.
   Include the actual status, exit code and up to 8,000 characters of redacted,
