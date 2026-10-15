@@ -28,7 +28,10 @@ Do not bypass failing checks or add broad dependency overrides.
 collection while reading an unfinished response. Include that flag when running
 `test/bridge.test.js` directly; its deadlines must survive collection on Node 20/22.
 `npm run check:bridge-lifetime` repeats the timeout and cancellation regressions
-with forced optimization, which reproduced premature timeout collection on Node 20.
+with forced garbage collection. The variants historically also ran with
+`--always-turbofan`; V8 removed that flag in newer Node (verified gone in
+Node 26), so on Node 20/22 you may add it manually when reproducing the
+premature-timeout-collection bug fixed earlier.
 The targeted Seroval/Babel overrides and their compatibility checks are explained
 in [SECURITY.md](SECURITY.md#dependency-security-and-compatibility).
 

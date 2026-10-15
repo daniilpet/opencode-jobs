@@ -1,7 +1,7 @@
 # Using jobs
 
-This guide describes **0.4.0 preview**, adding host-version range support and
-subagent job attribution. Its finite limits,
+This guide describes **0.5.0 preview**, adding the single-confirmation updater,
+subagent completion delivery and host-version range support. Its finite limits,
 dedicated worker sessions, and security hardening are not in the v0.1.0 bundle.
 Existing installations require a separately reviewed manual update.
 

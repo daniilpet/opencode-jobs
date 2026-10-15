@@ -14,8 +14,9 @@ with the terminal UI closed, provided the machine, shared OpenCode server, and
 local scheduler process are running. It does not automatically replay interrupted
 shell commands or silently execute missed prompts late.
 
-**Version scope:** this checkout describes **0.4.0 preview**, adding host-version
-range support and subagent job attribution to connection
+**Version scope:** this checkout describes **0.5.0 preview**, adding the
+single-confirmation updater and subagent completion delivery to host-version
+range support and subagent job attribution, connection
 diagnostics, terminal task management, finite job limits and dedicated scheduled-work
 sessions. Existing installations require a reviewed manual update;
 installers refuse to overwrite them.

@@ -1,6 +1,7 @@
 # Installation and operations
 
-This guide targets **0.4.0 preview**, including host-version range support, subagent
+This guide targets **0.5.0 preview**, including the single-confirmation updater,
+subagent completion delivery, host-version range support, subagent
 job attribution, connection diagnostics, terminal task
 management, finite job limits and dedicated scheduled-work sessions. Existing
 installations require a separately reviewed manual update as described in section 4.
@@ -39,16 +40,16 @@ On Linux, with both files in the current directory:
 
 ```sh
 sha256sum -c SHA256SUMS
-tar -xzf opencode-jobs-0.4.0.tar.gz
-cd opencode-jobs-0.4.0
+tar -xzf opencode-jobs-0.5.0.tar.gz
+cd opencode-jobs-0.5.0
 ```
 
-On Windows, compare `Get-FileHash .\opencode-jobs-0.4.0.tar.gz -Algorithm SHA256`
+On Windows, compare `Get-FileHash .\opencode-jobs-0.5.0.tar.gz -Algorithm SHA256`
 with the archive's line in `SHA256SUMS`, then:
 
 ```powershell
-tar -xzf .\opencode-jobs-0.4.0.tar.gz
-Set-Location .\opencode-jobs-0.4.0
+tar -xzf .\opencode-jobs-0.5.0.tar.gz
+Set-Location .\opencode-jobs-0.5.0
 ```
 
 The archive includes `.runtime/package` and `scripts/`. Do not relocate either
