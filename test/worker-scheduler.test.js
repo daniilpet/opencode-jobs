@@ -50,6 +50,146 @@ test('результат worker возвращается родителю оди
   assert.equal(f.stopped.length, 1);
 });
 
+for (const config of [
+  { kind: 'schedule', due: 10, prompt: 'work' },
+  { kind: 'loop', interval: 10000, maxRuns: 1, prompt: 'work' },
+]) {
+  test(`${config.kind}: результат получает корень и исходный ребёнок без второго исполнения`, async () => {
+    const f = fixture();
+    await f.scheduler.load(0);
+    await f.scheduler.add('ses_parent', { ...config, createdBy: 'ses_child' }, 0);
+    const due = config.due ?? config.interval;
+    await f.scheduler.tick(due);
+    f.finish();
+
+    await f.scheduler.tick(due + 1);
+    await f.scheduler.tick(due + 2);
+
+    const results = [...f.sent.values()].filter((entry) => entry.type === 'result');
+    assert.deepEqual(results.map((entry) => entry.sessionID), ['ses_parent', 'ses_child']);
+    assert.equal(new Set(results.map((entry) => entry.id)).size, 2);
+    assert.equal(results[0].text, results[1].text);
+    assert.equal([...f.sent.values()].filter((entry) => entry.type === 'prompt').length, 1);
+    assert.equal(f.prepared.length, 1);
+  });
+
+  test(`${config.kind}: подтверждённый сбой worker сообщает корню и ребёнку`, async () => {
+    const f = fixture();
+    await f.scheduler.load(0);
+    await f.scheduler.add('ses_parent', { ...config, createdBy: 'ses_child' }, 0);
+    const due = config.due ?? config.interval;
+    await f.scheduler.tick(due);
+    f.pending.clear();
+    f.scheduler.io.observeWorker = async () => ({ status: 'failed' });
+
+    await f.scheduler.tick(due + 1);
+    await f.scheduler.tick(due + 2);
+
+    const failures = [...f.sent.values()].filter((entry) => entry.type === 'failure');
+    assert.deepEqual(failures.map((entry) => entry.sessionID), ['ses_parent', 'ses_child']);
+    assert.match(failures[1].text, /failed.*Повторное исполнение не выполнено/);
+    assert.equal(f.saved().jobs[0].status, 'failed');
+    assert.equal(f.prepared.length, 1);
+  });
+}
+
+for (const recipient of ['ses_parent', 'ses_child']) {
+  test(`потерянный ACK ${recipient} сохраняет частичный сбой и ID результата после рестарта`, async () => {
+    const f = fixture();
+    await f.scheduler.load(0);
+    await f.scheduler.add('ses_parent', { kind: 'loop', interval: 10000, prompt: 'work', createdBy: 'ses_child' }, 0);
+    await f.scheduler.tick(10000);
+    f.finish();
+    const deliver = f.scheduler.io.deliver;
+    f.scheduler.io.deliver = async (entry) => {
+      await deliver(entry);
+      if (entry.type === 'result' && entry.sessionID === recipient) throw new Error('lost result ACK');
+    };
+    await f.scheduler.tick(10001);
+    const queued = structuredClone(f.saved().outbox);
+    assert.equal(f.saved().jobs[0].delivery, 'failed');
+    await f.scheduler.tick(20000);
+    const restored = fixture(f.saved());
+    restored.scheduler.io.deliver = deliver;
+    restored.scheduler.io.isPending = f.scheduler.io.isPending;
+
+    await restored.scheduler.load(20001);
+    await restored.scheduler.tick(20001);
+
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].sessionID, recipient);
+    assert.equal(f.sent.get(queued[0].id).sessionID, recipient);
+    assert.equal([...f.sent.values()].filter((entry) => entry.type === 'result').length, 2);
+    assert.equal([...f.sent.values()].filter((entry) => entry.type === 'prompt').length, 1);
+    assert.equal(restored.saved().jobs[0].delivery, 'sent');
+    assert.equal(restored.prepared.length, 0);
+  });
+}
+
+async function occupyQueue(f, count, now) {
+  const blocker = await f.scheduler.add('ses_backlog', { kind: 'monitor', command: 'fixture' }, now);
+  for (let i = 0; i < count; i++) await f.scheduler.output('ses_backlog', blocker.id, 'waiting notification', now);
+  await f.scheduler.consume('ses_backlog', blocker.id, { status: 'completed' }, undefined, now);
+}
+
+for (const [count, timeout] of [[99, 30000], [100, 20000]]) {
+  test(`${count} ожидающих: результат ребёнка ждёт места для обоих адресатов после рестарта`, async () => {
+    const f = fixture();
+    await f.scheduler.load(0);
+    await f.scheduler.add('ses_parent', { kind: 'loop', interval: 10000, timeout, prompt: 'work', createdBy: 'ses_child' }, 0);
+    await f.scheduler.tick(10000);
+    f.pending.clear();
+    await f.scheduler.tick(10001);
+    await occupyQueue(f, count, 10001);
+    f.scheduler.io.observeWorker = async () => ({ status: 'succeeded', text: 'QUEUED_RESULT' });
+    await f.scheduler.tick(10002);
+    assert.equal(f.saved().jobs[0].workerResult?.text, 'QUEUED_RESULT');
+    assert.equal(f.saved().outbox.filter((entry) => entry.type === 'result').length, 0);
+    const restored = fixture(f.saved());
+    f.pending.forEach((id) => restored.pending.add(id));
+    await restored.scheduler.load(20001);
+    await restored.scheduler.tick(20001);
+    assert.equal(restored.saved().jobs[0].workerResult?.text, 'QUEUED_RESULT');
+    [...restored.pending].slice(0, count - 98).forEach((id) => restored.pending.delete(id));
+
+    await restored.scheduler.tick(20002);
+
+    const results = [...restored.sent.values()].filter((entry) => entry.type === 'result');
+    assert.deepEqual(results.map((entry) => entry.sessionID), ['ses_parent', 'ses_child']);
+    assert.match(results[1].text, /QUEUED_RESULT/);
+    assert.equal(restored.scheduler.outstanding(), 100);
+    assert.equal(restored.prepared.length, 0);
+    assert.equal(restored.saved().jobs[0].executionStatus, 'succeeded');
+  });
+}
+
+test('полная очередь сохраняет подтверждённый сбой ребёнка для обоих адресатов после рестарта', async () => {
+  const f = fixture();
+  await f.scheduler.load(0);
+  await f.scheduler.add('ses_parent', { kind: 'schedule', due: 10, prompt: 'work', createdBy: 'ses_child' }, 0);
+  await f.scheduler.tick(10);
+  f.pending.clear();
+  await f.scheduler.tick(11);
+  await occupyQueue(f, 100, 11);
+  f.scheduler.io.observeWorker = async () => ({ status: 'failed' });
+  await f.scheduler.tick(12);
+  await f.scheduler.tick(13);
+  assert.match(f.saved().jobs[0].deferredFailure?.reason ?? '', /failed/);
+  const restored = fixture(f.saved());
+  f.pending.forEach((id) => restored.pending.add(id));
+  await restored.scheduler.load(14);
+  [...restored.pending].slice(0, 2).forEach((id) => restored.pending.delete(id));
+
+  await restored.scheduler.tick(15);
+  await restored.scheduler.tick(16);
+
+  const failures = [...restored.sent.values()].filter((entry) => entry.type === 'failure');
+  assert.deepEqual(failures.map((entry) => entry.sessionID), ['ses_parent', 'ses_child']);
+  assert.match(failures[1].text, /failed/);
+  assert.equal(restored.scheduler.outstanding(), 100);
+  assert.equal(restored.prepared.length, 0);
+});
+
 test('выполняющаяся итерация объединяет тики даже после потребления inbox', async () => {
   const f = fixture();
   await f.scheduler.load(0);
@@ -130,29 +270,31 @@ test('подтверждённый результат переживает не�
   assert.equal(restored.saved().jobs[0].executionStatus, 'succeeded');
 });
 
-test('истечение срока внутри fork не отправляет prompt и сообщает родителю', async () => {
+test('истечение срока внутри fork не отправляет prompt и сообщает корню и ребёнку', async () => {
   const f = fixture();
   await f.scheduler.load(0);
-  await f.scheduler.add('ses_parent', { kind: 'schedule', due: 10, prompt: 'NEVER_LATE', timeout: 1000 }, 0);
+  await f.scheduler.add('ses_parent', { kind: 'schedule', due: 10, prompt: 'NEVER_LATE', timeout: 1000, createdBy: 'ses_child' }, 0);
   f.scheduler.io.prepareWorker = async () => { f.scheduler.io.now = () => 2000; return 'ses_worker'; };
   await f.scheduler.tick(10);
   await f.scheduler.tick(2000);
   const sent = [...f.sent.values()];
-  assert.equal(sent.length, 1);
+  assert.equal(sent.length, 2);
   assert.equal(sent[0].type, 'failure');
   assert.equal(sent[0].sessionID, 'ses_parent');
+  assert.equal(sent[1].sessionID, 'ses_child');
   assert.equal(f.saved().jobs[0].status, 'expired');
 });
 
 test('уведомление нового пропущенного schedule не блокирует восстановление', async () => {
   const f = fixture();
   await f.scheduler.load(0);
-  await f.scheduler.add('ses_parent', { kind: 'schedule', due: 10, prompt: 'NEVER_LATE' }, 0);
+  await f.scheduler.add('ses_parent', { kind: 'schedule', due: 10, prompt: 'NEVER_LATE', createdBy: 'ses_child' }, 0);
   await f.scheduler.tick(6000);
   const restored = fixture(f.saved());
   await restored.scheduler.load(6001);
   await restored.scheduler.tick(6002);
   assert.equal([...f.sent.values()][0].type, 'failure');
+  assert.deepEqual([...f.sent.values()].map((entry) => entry.sessionID), ['ses_parent', 'ses_child']);
   assert.equal(restored.saved().jobs[0].status, 'missed');
   assert.equal(restored.prepared.length, 0);
 });

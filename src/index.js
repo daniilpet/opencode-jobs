@@ -128,6 +128,11 @@ export default {
           const page = unwrap(await request(`/api/shell/${job.shellID}/output?cursor=${cursor}&limit=16384`, { directory: job.directory }));
           cursor = page.cursor;
           const preview = sanitize(page.output).split('\n').filter(Boolean).slice(-3);
+          let completionOutput;
+          if (job.kind === 'background' && job.createdBy && job.createdBy !== job.sessionID && ended && cursor >= page.size) {
+            const result = await shellRequest(job, `/output?cursor=${Math.max(0, page.size - 32768)}&limit=32768`);
+            completionOutput = sanitize(result.output).slice(-8000);
+          }
           let text;
           let monitorState;
           if (job.kind === 'monitor') {
@@ -135,7 +140,7 @@ export default {
             text = await monitor.ingest(page.output, Date.now(), ended && cursor >= page.size);
             monitorState = monitor.snapshot();
           }
-          await scheduler.consume(job.sessionID, job.id, { cursor, preview, ...(monitorState ? { monitorState } : {}), ...(ended && cursor >= page.size ? { status: info.status === 'timeout' ? 'expired' : info.exit === 0 ? 'completed' : 'failed', exit: info.exit ?? -1, ended: Date.now() } : {}) }, text, Date.now());
+          await scheduler.consume(job.sessionID, job.id, { cursor, preview, ...(completionOutput !== undefined ? { completionOutput } : {}), ...(monitorState ? { monitorState } : {}), ...(ended && cursor >= page.size ? { status: info.status === 'timeout' ? 'expired' : info.exit === 0 ? 'completed' : 'failed', exit: info.exit ?? -1, ended: Date.now() } : {}) }, text, Date.now());
         } catch (error) {
           active();
           if (String(error.message).includes('HTTP 404') || /выражени|Worker/.test(error.message)) await scheduler.report(job.sessionID, job.id, sanitize(error.message));

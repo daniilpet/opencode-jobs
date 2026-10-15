@@ -14,11 +14,22 @@ async function fixture(t, sessions) {
   const root = await mkdtemp(join(tmpdir(), 'jobs-attribution-'));
   const previousState = process.env.OPENCODE_JOBS_STATE;
   process.env.OPENCODE_JOBS_STATE = root;
+  const shell = { metadata: { sessionID: 'ses_child' }, status: 'running', time: { started: Date.now() } };
+  const capture = { output: 'CHILD_RESULT token=FIXTURE_COMPLETION_SECRET' };
+  const sent = [];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     const send = (data, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
     if (url.pathname === '/api/info') return send({ version: '2.0.22', pid: process.pid });
-    if (url.pathname === '/api/shell/sh_child') return send({ data: { metadata: { sessionID: 'ses_child' }, status: 'running', time: { started: Date.now() } } });
+    if (url.pathname === '/api/shell/sh_child') return send({ data: shell });
+    if (url.pathname === '/api/shell/sh_child/output') return send({ data: { output: capture.output.slice(Number(url.searchParams.get('cursor'))), cursor: capture.output.length, size: capture.output.length } });
+    if (/\/api\/session\/[^/]+\/inbox$/.test(url.pathname)) return send({ data: [] });
+    if (/\/api\/session\/[^/]+\/synthetic$/.test(url.pathname)) {
+      let body = '';
+      for await (const part of req) body += part;
+      sent.push({ path: url.pathname, input: JSON.parse(body) });
+      return send({ data: {} });
+    }
     send({ unexpected: url.pathname }, 500);
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -52,7 +63,7 @@ async function fixture(t, sessions) {
     server.closeAllConnections();
     return Promise.all([new Promise((resolve) => server.close(resolve)), cleanup()]);
   });
-  return { call, known };
+  return { call, known, shell, sent, capture };
 }
 
 const directory = { directory: 'C:/synthetic/project' };
@@ -166,4 +177,77 @@ test('worker-сессия не создаёт задания независим�
   await assert.rejects(f.call('create', { sessionID: 'ses_worker_child', name: 'background', raw: 'echo hi' }), /вложенные задания/i);
   const fromRoot = await f.call('list', { sessionID: 'ses_root' });
   assert.deepEqual(fromRoot.jobs, []);
+});
+
+test('завершение фоновой команды субагента будит корень без пользовательского запроса', async (t) => {
+  const f = await fixture(t, {
+    'ses_root': plain('ses_root'),
+    'ses_child': plain('ses_child', { parentID: 'ses_root' }),
+  });
+  const { job } = await f.call('create', { sessionID: 'ses_child', name: 'background', raw: 'synthetic command' });
+  await f.call('attach', { sessionID: 'ses_child', id: job.id, shellID: 'sh_child' });
+  await f.call('tick', {});
+  assert.equal(f.sent.length, 0);
+  f.shell.status = 'exited';
+  f.shell.exit = 0;
+
+  await f.call('tick', {});
+  await f.call('tick', {});
+
+  assert.equal((await f.call('list', { sessionID: 'ses_root' })).jobs[0].status, 'completed');
+  assert.equal(f.sent.length, 1);
+  assert.equal(f.sent[0].path, '/api/session/ses_root/synthetic');
+  assert.equal(f.sent[0].input.resume, true);
+  assert.equal(f.sent[0].input.metadata.opencodeJobs.id, job.id);
+  assert.match(f.sent[0].input.text, /CHILD_RESULT/);
+  assert.doesNotMatch(f.sent[0].input.text, /FIXTURE_COMPLETION_SECRET/);
+});
+
+test('ошибочный exit субагента доставляется корню как failed без повторного исполнения', async (t) => {
+  const f = await fixture(t, { 'ses_root': plain('ses_root'), 'ses_child': plain('ses_child', { parentID: 'ses_root' }) });
+  const { job } = await f.call('create', { sessionID: 'ses_child', name: 'background', raw: 'synthetic failure' });
+  await f.call('attach', { sessionID: 'ses_child', id: job.id, shellID: 'sh_child' });
+  f.shell.status = 'exited';
+  f.shell.exit = 7;
+
+  await f.call('tick', {});
+  await f.call('tick', {});
+
+  assert.equal(f.sent.length, 1);
+  assert.equal(f.sent[0].input.sessionID, 'ses_root');
+  assert.match(f.sent[0].input.text, /Статус: failed, код выхода: 7/);
+  assert.equal((await f.call('list', { sessionID: 'ses_root' })).jobs[0].status, 'failed');
+});
+
+test('завершение background в корне не дублирует штатное уведомление shell', async (t) => {
+  const f = await fixture(t, { 'ses_root': plain('ses_root') });
+  f.shell.metadata.sessionID = 'ses_root';
+  const { job } = await f.call('create', { sessionID: 'ses_root', name: 'background', raw: 'synthetic root command' });
+  await f.call('attach', { sessionID: 'ses_root', id: job.id, shellID: 'sh_child' });
+  f.shell.status = 'exited';
+  f.shell.exit = 0;
+
+  await f.call('tick', {});
+  await f.call('tick', {});
+
+  assert.equal((await f.call('list', { sessionID: 'ses_root' })).jobs[0].status, 'completed');
+  assert.equal(f.sent.length, 0);
+});
+
+test('завершение background не раскрывает продолжение токена между страницами вывода', async (t) => {
+  const f = await fixture(t, { 'ses_root': plain('ses_root'), 'ses_child': plain('ses_child', { parentID: 'ses_root' }) });
+  const { job } = await f.call('create', { sessionID: 'ses_child', name: 'background', raw: 'synthetic redaction' });
+  await f.call('attach', { sessionID: 'ses_child', id: job.id, shellID: 'sh_child' });
+  f.capture.output = 'sk-abcdefghijklmnopqrst';
+  await f.call('tick', {});
+  f.capture.output += 'uvwxyz0123456789\nSAFE_RESULT';
+  f.shell.status = 'exited';
+  f.shell.exit = 0;
+
+  await f.call('tick', {});
+  await f.call('tick', {});
+
+  assert.equal(f.sent.length, 1);
+  assert.match(f.sent[0].input.text, /SAFE_RESULT/);
+  assert.doesNotMatch(f.sent[0].input.text, /abcdefghijklmnopqrst|uvwxyz0123456789/);
 });

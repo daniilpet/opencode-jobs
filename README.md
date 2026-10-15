@@ -5,7 +5,8 @@
 
 Persistent, machine-local background jobs for **OpenCode V2** on Windows and Linux.
 Run shell commands in the background, watch their output, schedule prompts, and
-receive results in the session that created the job. No OpenCode fork is required.
+receive results in the owning conversation, including jobs launched by its subagents.
+No OpenCode fork is required.
 
 **Early preview. Runs on OpenCode 2.x (2.0.22 or newer); verified against 2.0.22,
 2.0.24, and 2.0.26.** The scheduler keeps working
@@ -112,6 +113,9 @@ This project is not published to npm.
   jobs, subagents, and native background shell are disabled in worker sessions.
   This is not a real-time scheduler or an operating-system sandbox. Third-party
   tools that ignore cancellation are outside the execution-limit guarantee.
+- In the unreleased source, subagent schedules and loops return results and
+  confirmed failures to both the root and the creating child. Both notifications
+  can wake models and incur provider costs; they authorize no new work.
 - Legacy unbounded active jobs and old scheduled-prompt deliveries can block
   loading. Review the [manual update requirements](DEPLOYMENT.md#4-state-and-updates)
   before replacing an existing installation.

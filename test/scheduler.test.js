@@ -330,3 +330,60 @@ test('результат задания субагента помечает ис
   const result = f.messages.find((item) => item.type === 'result');
   assert.match(result.text, /^Задание субагента "Ревью кода": OpenCode jobs: результат/);
 });
+
+test('результат background переживает потерянный ответ доставки, рестарт и срок команды', async () => {
+  const f = fixture();
+  await f.scheduler.load(0);
+  const job = await f.scheduler.add('ses_root', { kind: 'background', command: 'fixture', timeout: 1000, createdBy: 'ses_child' }, 0);
+  await f.scheduler.consume('ses_root', job.id, { status: 'completed', exit: 0, ended: 10, completionOutput: 'CONFIRMED_RESULT' }, undefined, 10);
+  const deliver = f.scheduler.io.deliver;
+  f.scheduler.io.deliver = async (entry) => { await deliver(entry); throw new Error('admission response lost'); };
+  await f.scheduler.tick(20);
+  const retained = f.saved();
+  const attempts = [];
+  const restarted = new Scheduler({ ...f.scheduler.io, load: async () => retained, deliver: async (entry) => { attempts.push(entry.id); await deliver(entry); } });
+
+  await restarted.load(2000);
+  await restarted.tick(2000);
+  await restarted.tick(3000);
+
+  assert.equal((await restarted.list('ses_root'))[0].status, 'completed');
+  assert.equal(f.messages.length, 1);
+  assert.deepEqual(attempts, [f.messages[0].id]);
+  assert.match(f.messages[0].text, /CONFIRMED_RESULT/);
+  assert.equal(f.messages[0].type, 'result');
+});
+
+test('предельный срок background субагента уведомляет корень после подтверждения остановки', async () => {
+  const f = fixture();
+  const stopped = [];
+  f.scheduler.io.stopShell = async (job) => { stopped.push(job.shellID); };
+  await f.scheduler.load(0);
+  const job = await f.scheduler.add('ses_root', { kind: 'background', command: 'fixture', timeout: 1000, createdBy: 'ses_child' }, 0);
+  await f.scheduler.attach('ses_root', job.id, 'sh_child', 0);
+
+  await f.scheduler.tick(1000);
+  await f.scheduler.tick(2000);
+
+  assert.deepEqual(stopped, ['sh_child']);
+  assert.equal((await f.scheduler.list('ses_root'))[0].status, 'expired');
+  assert.equal(f.messages.length, 1);
+  assert.equal(f.messages[0].sessionID, 'ses_root');
+  assert.match(f.messages[0].text, /Истёк предельный срок/);
+});
+
+test('повторный attach завершённого shell сохраняет результат и не начинает cleanup', async () => {
+  const f = fixture();
+  const stopped = [];
+  f.scheduler.io.stopShell = async (job) => { stopped.push(job.shellID); };
+  await f.scheduler.load(0);
+  const job = await f.scheduler.add('ses_root', { kind: 'background', command: 'fixture', timeout: 1000, createdBy: 'ses_child' }, 0);
+  await f.scheduler.attach('ses_root', job.id, 'sh_child', 0);
+  await f.scheduler.consume('ses_root', job.id, { status: 'completed', exit: 0, ended: 10, completionOutput: 'RESULT' }, undefined, 10);
+  const completed = f.saved();
+
+  await f.scheduler.attach('ses_root', job.id, 'sh_child', 2000);
+
+  assert.deepEqual(f.saved(), completed);
+  assert.deepEqual(stopped, []);
+});

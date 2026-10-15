@@ -56,10 +56,10 @@ for (const config of [
 test('завершение shell в очереди перед cancel сохраняет точный результат и уведомление', async () => {
   const f = fixture();
   await f.scheduler.load(0);
-  const job = await f.scheduler.add('ses_owner', { kind: 'background', command: 'fixture' }, 0);
+  const job = await f.scheduler.add('ses_owner', { kind: 'background', command: 'fixture', createdBy: 'ses_child' }, 0);
   await f.scheduler.attach('ses_owner', job.id, 'sh_owned', 1);
 
-  const completion = f.scheduler.consume('ses_owner', job.id, { status: 'completed', ended: 20, exitCode: 0, cursor: 4 }, 'RESULT', 20);
+  const completion = f.scheduler.consume('ses_owner', job.id, { status: 'completed', ended: 20, exit: 0, cursor: 4, completionOutput: 'RESULT' }, undefined, 20);
   const cancellation = f.scheduler.cancel('ses_owner', job.id);
   await completion;
   const before = structuredClone(f.saved());
@@ -191,10 +191,10 @@ test('после независимой финализации результа�
   assert.deepEqual(f.stopped, ['launch', `ses_worker_${f.job.id}`]);
 });
 
-async function loopResult(queued = false) {
+async function loopResult(queued = false, createdBy) {
   const f = fixture();
   await f.scheduler.load(0);
-  const job = await f.scheduler.add('ses_owner', { kind: 'loop', interval: 10000, prompt: 'work' }, 0);
+  const job = await f.scheduler.add('ses_owner', { kind: 'loop', interval: 10000, prompt: 'work', ...(createdBy ? { createdBy } : {}) }, 0);
   await f.scheduler.tick(10000);
   f.pending.clear();
   f.scheduler.io.observeWorker = async () => ({ status: 'succeeded', text: 'ITERATION_RESULT' });
@@ -224,6 +224,29 @@ test('отмена цикла сохраняет result в outbox и прекр�
   assert.deepEqual(f.sent.get(f.resultID), before[0]);
   assert.equal([...f.sent.values()].filter((entry) => entry.type === 'prompt').length, 1);
   assert.deepEqual(f.stopped, [`ses_worker_${f.job.id}`]);
+  assert.deepEqual(f.cancelled, []);
+});
+
+test('отмена цикла сохраняет оба queued result и маршруты после повторного cleanup', async () => {
+  const f = await loopResult(true, 'ses_child');
+  const before = structuredClone(f.saved().outbox);
+  f.scheduler.io.stopWorker = async () => { throw new Error('stop unavailable'); };
+  await f.scheduler.cancel('ses_owner', f.job.id);
+  await f.scheduler.tick(20000);
+  assert.deepEqual(f.saved().outbox, before);
+  f.scheduler.io.stopWorker = async () => {};
+  await f.scheduler.cancel('ses_owner', f.job.id);
+  f.scheduler.io.deliver = f.deliver;
+  f.scheduler.io.isPending = async (sessionID, id) => f.pending.has(id) && f.sent.get(id)?.sessionID === sessionID;
+
+  await f.scheduler.tick(30000);
+  await f.scheduler.tick(30001);
+
+  const results = [...f.sent.values()].filter((entry) => entry.type === 'result');
+  assert.deepEqual(results.map((entry) => entry.sessionID), ['ses_owner', 'ses_child']);
+  assert.deepEqual(f.saved().jobs[0].messages, before.map((entry) => entry.id));
+  assert.equal(f.saved().jobs[0].messageSessions[results[1].id], 'ses_child');
+  assert.equal([...f.sent.values()].filter((entry) => entry.type === 'prompt').length, 1);
   assert.deepEqual(f.cancelled, []);
 });
 
@@ -268,23 +291,31 @@ test('повтор stopPending и тик сохраняют queued result до �
   assert.equal([...f.sent.values()].filter((entry) => entry.type === 'prompt').length, 1);
 });
 
-test('восстановленный cleanup сохраняет parent result и отменяет только текущий worker prompt', async () => {
+test('восстановленный cleanup сохраняет parent/child result и отменяет только текущий worker prompt', async () => {
   const f = fixture({ version: 1, lastTick: 0, outbox: [], jobs: [{
     id: 'job_restore', kind: 'loop', sessionID: 'ses_owner', status: 'cancelled',
     executionMode: 'worker', workerID: 'ses_worker', stopPending: true,
+    createdBy: 'ses_child',
     error: 'Задание отменено.', ended: 100,
-    messages: ['msg_result', 'msg_prompt'], messageSessions: { msg_prompt: 'ses_worker' },
+    messages: ['msg_result', 'msg_child_result', 'msg_prompt'], messageSessions: { msg_child_result: 'ses_child', msg_prompt: 'ses_worker' },
     runMessage: 'msg_prompt', lastMessage: 'msg_prompt',
   }] });
   f.pending.add('msg_result');
+  f.pending.add('msg_child_result');
   f.pending.add('msg_prompt');
+  const sessions = { msg_result: 'ses_owner', msg_child_result: 'ses_child', msg_prompt: 'ses_worker' };
+  f.scheduler.io.isPending = async (sessionID, id) => f.pending.has(id) && sessions[id] === sessionID;
 
   await f.scheduler.load(200);
 
-  assert.deepEqual(f.saved().jobs[0].messages, ['msg_result']);
+  await f.scheduler.tick(201);
+
+  assert.deepEqual(f.saved().jobs[0].messages, ['msg_result', 'msg_child_result']);
+  assert.deepEqual(f.saved().jobs[0].messageSessions, { msg_child_result: 'ses_child' });
   assert.equal(f.saved().jobs[0].stopPending, undefined);
   assert.equal(f.saved().jobs[0].runMessage, undefined);
   assert.equal(f.pending.has('msg_result'), true);
+  assert.equal(f.pending.has('msg_child_result'), true);
   assert.equal(f.pending.has('msg_prompt'), false);
   assert.deepEqual(f.cancelled, [{ sessionID: 'ses_worker', id: 'msg_prompt' }]);
   assert.deepEqual(f.stopped, ['ses_worker']);
