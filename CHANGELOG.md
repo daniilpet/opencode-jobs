@@ -9,8 +9,13 @@
   launchd throttle interval (10 seconds, versus `RestartSec=2` on Linux), appends
   output to `pump.log` in the state directory instead of a journal, records the
   absolute Node executable path at installation, and refuses to replace an
-  existing installation. The single-confirmation updater stops and restarts the
-  agent through `launchctl` without elevation. macOS joins the supported
+  existing installation. Because LaunchAgents do not inherit the login-shell
+  environment, the installer also records the path-related environment variables
+  (`OPENCODE_JOBS_STATE`, `OPENCODE_JOBS_SERVICE_FILE`, `XDG_STATE_HOME`,
+  `XDG_DATA_HOME`, `XDG_CONFIG_HOME`) set in the installing shell into the agent
+  so the pump sees the same directories and server registration as OpenCode.
+  The single-confirmation updater stops and restarts the agent through
+  `launchctl` without elevation. macOS joins the supported
   installer platforms.
 - Verified host OpenCode 2.1.0: the local isolated integration run of
   `scripts/smoke.js` (mock provider, no model requests) passed on macOS

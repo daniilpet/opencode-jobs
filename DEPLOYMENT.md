@@ -38,7 +38,12 @@ the generated service does not quote these paths. On macOS, spaces in paths are
 safe, but XML-special characters (`&`, `<`, `"`) in the home or Node executable
 path produce an invalid plist; the recorded Node path must also be a stable
 executable path — a versioned package directory (for example a keg-only
-Homebrew path) becomes stale after a Node major upgrade. These are known
+Homebrew path) becomes stale after a Node major upgrade. On macOS, LaunchAgents
+do not inherit the login-shell environment: the darwin installer records the
+values of `OPENCODE_JOBS_STATE`, `OPENCODE_JOBS_SERVICE_FILE`, `XDG_STATE_HOME`,
+`XDG_DATA_HOME`, and `XDG_CONFIG_HOME` set in the installing shell into the
+agent, so the pump resolves the same directories and server registration as the
+OpenCode process; unset variables are not written. These are known
 installer limitations, not conditions the installer automatically repairs.
 
 ## 2. Obtain a verified bundle

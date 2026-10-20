@@ -18,6 +18,18 @@ mkdir "$staging"
 cp -R "$artifact/." "$staging/"
 diff -qr "$artifact" "$staging"
 mv "$staging" "$target"
+# LaunchAgents не наследуют окружение login-shell (~/.zprofile): переменные путей,
+# заданные в установочной сессии, фиксируются в агенте, чтобы pump видел те же
+# каталоги и регистрацию сервера, что и сервер OpenCode.
+environment=""
+for variable in OPENCODE_JOBS_STATE OPENCODE_JOBS_SERVICE_FILE XDG_STATE_HOME XDG_DATA_HOME XDG_CONFIG_HOME; do
+  eval "value=\${$variable:-}"
+  if [ -n "$value" ]; then
+    environment="$environment
+		<key>$variable</key>
+		<string>$value</string>"
+  fi
+done
 cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -45,6 +57,9 @@ cat > "$plist" <<EOF
 	<integer>63</integer>
 	<key>ProcessType</key>
 	<string>Background</string>
+	<key>EnvironmentVariables</key>
+	<dict>$environment
+	</dict>
 	<key>StandardOutPath</key>
 	<string>$state/pump.log</string>
 	<key>StandardErrorPath</key>
