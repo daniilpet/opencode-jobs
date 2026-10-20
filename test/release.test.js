@@ -35,6 +35,7 @@ test('release contains installer-compatible layout, notices and a valid checksum
   assert.match(listing.stdout, /opencode-jobs-0\.1\.0\/\.runtime\/package\/index\.js/);
   assert.match(listing.stdout, /scripts\/install-windows\.ps1/);
   assert.match(listing.stdout, /scripts\/install-linux\.sh/);
+  assert.match(listing.stdout, /scripts\/install-darwin\.sh/);
   assert.match(listing.stdout, /scripts\/verify-install\.js/);
   assert.match(listing.stdout, /\/LICENSE/);
   assert.match(listing.stdout, /opencode-jobs-0\.1\.0\/package\.json/);

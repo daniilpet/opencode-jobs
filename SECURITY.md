@@ -3,7 +3,7 @@
 ## Supported scope
 
 The 0.5.0 preview runs on OpenCode 2.x (2.0.22 or newer); versions 2.0.22, 2.0.24,
-and 2.0.26 are verified on Windows and Linux.
+and 2.0.26 are verified on Windows and Linux, and 2.1.0 is verified on macOS.
 Compatibility and security of newer hosts or unsupported platforms are not
 claimed. Patches will be handled on a best-effort basis; there is no response SLA.
 

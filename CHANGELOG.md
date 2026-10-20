@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Add a macOS (darwin) installer. `scripts/install-darwin.sh` installs the
+  verified bundle under `~/.config/opencode/plugins/jobs` and supervises the pump
+  with a per-user launchd LaunchAgent (`com.daniilpet.opencode-jobs`): it starts
+  at login, is restarted by launchd only after a non-zero exit subject to the
+  launchd throttle interval (10 seconds, versus `RestartSec=2` on Linux), appends
+  output to `pump.log` in the state directory instead of a journal, records the
+  absolute Node executable path at installation, and refuses to replace an
+  existing installation. The single-confirmation updater stops and restarts the
+  agent through `launchctl` without elevation. macOS joins the supported
+  installer platforms.
+- Verified host OpenCode 2.1.0: the local isolated integration run of
+  `scripts/smoke.js` (mock provider, no model requests) passed on macOS
+  (arm64, Node 24.22.0), covering native background/monitor, subagent result
+  delivery, permission denial/ask flows, approval expiry, cancellation races,
+  finite timeouts and worker isolation.
+
 ## 0.5.0 - updater and subagent completion
 
 - Deliver observed subagent `background` completion to the owning conversation
