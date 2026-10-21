@@ -107,6 +107,23 @@ export const controllers = {
     stop: () => run('systemctl', ['--user', 'stop', 'opencode-jobs.service']),
     start: () => run('systemctl', ['--user', 'start', 'opencode-jobs.service']),
   },
+  darwin: {
+    async stop() {
+      const target = `gui/${process.getuid()}/com.daniilpet.opencode-jobs`;
+      const loaded = await run('launchctl', ['print', target]).then(() => true, () => false);
+      if (loaded) await run('launchctl', ['bootout', target]);
+    },
+    async start() {
+      const domain = `gui/${process.getuid()}`;
+      const target = `${domain}/com.daniilpet.opencode-jobs`;
+      const loaded = await run('launchctl', ['print', target]).then(() => true, () => false);
+      if (loaded) {
+        await run('launchctl', ['kickstart', target]);
+        return;
+      }
+      await run('launchctl', ['bootstrap', domain, join(homedir(), 'Library', 'LaunchAgents', 'com.daniilpet.opencode-jobs.plist')]);
+    },
+  },
   windows: (helper) => {
     let broker = null;
     return {
@@ -235,7 +252,7 @@ export async function runUpdate(options) {
     try {
       await controller.start();
     } catch (startError) {
-      rollbackNote = ` Запуск после отката не подтверждён (${startError.message}); запустите задачу планировщика вручную.`;
+      rollbackNote = ` Запуск после отката не подтверждён (${startError.message}); запустите службу планировщика вручную.`;
     }
     await poll('проверка после отката', async (attempt) => {
       const installed = JSON.parse(await readFile(join(pluginDir, 'package.json'), 'utf8'));
@@ -266,7 +283,9 @@ async function main() {
   const log = (message) => process.stderr.write(`${message}\n`);
   const controller = process.platform === 'win32'
     ? controllers.windows(join(dirname(process.argv[1] ?? ''), 'update-windows-task.ps1'))
-    : controllers.linux;
+    : process.platform === 'darwin'
+      ? controllers.darwin
+      : controllers.linux;
   const result = await runUpdate({ pluginDir, auxDir, controller, archiveBuffer, sumsText, archiveName: release.name, targetVersion: release.version, mode: args.mode, log, backupsRoot });
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   if (result.status === 'rolled-back') process.exitCode = 4;

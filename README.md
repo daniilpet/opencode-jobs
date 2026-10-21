@@ -3,13 +3,14 @@
 [![Checks](https://github.com/daniilpet/opencode-jobs/actions/workflows/checks.yml/badge.svg)](https://github.com/daniilpet/opencode-jobs/actions/workflows/checks.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Persistent, machine-local background jobs for **OpenCode V2** on Windows and Linux.
+Persistent, machine-local background jobs for **OpenCode V2** on Windows, Linux,
+and macOS.
 Run shell commands in the background, watch their output, schedule prompts, and
 receive results in the owning conversation, including jobs launched by its subagents.
 No OpenCode fork is required.
 
 **Early preview. Runs on OpenCode 2.x (2.0.22 or newer); verified against 2.0.22,
-2.0.24, and 2.0.26.** The scheduler keeps working
+2.0.24, 2.0.26, and 2.1.0.** The scheduler keeps working
 with the terminal UI closed, provided the machine, shared OpenCode server, and
 local scheduler process are running. It does not automatically replay interrupted
 shell commands or silently execute missed prompts late.
@@ -72,7 +73,8 @@ Windows installation requires an elevated PowerShell under the same account as
 OpenCode. Linux installation requires a user systemd service manager; unattended
 operation also requires user lingering and an independently supervised OpenCode
 server. The preview installers support standard state directories; Linux paths
-must not contain spaces. macOS is not supported by the installers.
+must not contain spaces. macOS installation registers a per-user launchd
+LaunchAgent and needs no elevation.
 
 Download the `.tar.gz` bundle and `SHA256SUMS` from
 [Releases](https://github.com/daniilpet/opencode-jobs/releases), verify the checksum,
@@ -93,8 +95,9 @@ npm run check:security-dependencies
 npm run build
 ```
 
-Then run `scripts/install-windows.ps1` or
-`sh scripts/install-linux.sh .runtime/package` as described in the guide.
+Then run `scripts/install-windows.ps1`, `sh scripts/install-linux.sh
+.runtime/package`, or `sh scripts/install-darwin.sh .runtime/package` as
+described in the guide.
 Do not add an unbuilt source checkout directly with `opencode plugin add`:
 generated entrypoints and the supervised scheduler are required.
 This project is not published to npm.

@@ -111,6 +111,10 @@ jobs:
         if: matrix.oc == '2.0.22'
       - run: npm run check
         if: matrix.oc == '2.0.22'
+      - run: |
+          sh -n scripts/install-linux.sh
+          sh -n scripts/install-darwin.sh
+        if: matrix.oc == '2.0.22'
       - run: npm run check:security-dependencies
         if: matrix.oc == '2.0.22'
       - run: npm run check:bridge-lifetime

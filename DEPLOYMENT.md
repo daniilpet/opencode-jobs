@@ -24,14 +24,27 @@ On Linux, confirm `systemctl --user` works and inspect
 after logout. If needed, arrange lingering through your administrator; the
 installer does not enable it. On Windows, use an elevated PowerShell **as the
 OpenCode user**, not a different administrator account. S4U scheduled tasks may be
-restricted by organizational policy; do not bypass that policy.
+restricted by organizational policy; do not bypass that policy. On macOS, the
+installer registers a per-user launchd LaunchAgent under `~/Library/LaunchAgents`;
+no elevation is required. The agent starts at GUI login: after a reboot without
+logging into the desktop the pump does not run, and `launchctl bootstrap` from a
+pure SSH session may not find the GUI domain.
 
 The preview installers support standard user directories only: leave
 `OPENCODE_JOBS_STATE`, `XDG_DATA_HOME`, and `XDG_CONFIG_HOME` unset during installation and service
 operation. Environment overrides are for manually supervised/testing setups.
 On Linux, the home directory and Node executable path must not contain spaces;
-the generated service does not quote these paths. These are known installer
-limitations, not conditions the installer automatically repairs.
+the generated service does not quote these paths. On macOS, spaces in paths are
+safe, but XML-special characters (`&`, `<`, `"`) in the home or Node executable
+path produce an invalid plist; the recorded Node path must also be a stable
+executable path — a versioned package directory (for example a keg-only
+Homebrew path) becomes stale after a Node major upgrade. On macOS, LaunchAgents
+do not inherit the login-shell environment: the darwin installer records the
+values of `OPENCODE_JOBS_STATE`, `OPENCODE_JOBS_SERVICE_FILE`, `XDG_STATE_HOME`,
+`XDG_DATA_HOME`, and `XDG_CONFIG_HOME` set in the installing shell into the
+agent, so the pump resolves the same directories and server registration as the
+OpenCode process; unset variables are not written. These are known
+installer limitations, not conditions the installer automatically repairs.
 
 ## 2. Obtain a verified bundle
 
@@ -50,6 +63,15 @@ with the archive's line in `SHA256SUMS`, then:
 ```powershell
 tar -xzf .\opencode-jobs-0.5.0.tar.gz
 Set-Location .\opencode-jobs-0.5.0
+```
+
+On macOS, verify with `shasum` (there is no `sha256sum` binary) and extract the
+same way:
+
+```sh
+shasum -a 256 -c SHA256SUMS
+tar -xzf opencode-jobs-0.5.0.tar.gz
+cd opencode-jobs-0.5.0
 ```
 
 The archive includes `.runtime/package` and `scripts/`. Do not relocate either
@@ -84,7 +106,25 @@ systemctl --user status opencode-jobs.service
 A new `~/.config/systemd/user/opencode-jobs.service` runs the pump. The existing
 OpenCode service is not stopped. Plugin discovery uses OpenCode's normal watcher.
 
-Both installers refuse to replace an existing plugin directory or jobs service.
+macOS, as the ordinary OpenCode user:
+
+```sh
+sh scripts/install-darwin.sh .runtime/package
+node scripts/verify-install.js
+launchctl print "gui/$(id -u)/com.daniilpet.opencode-jobs" | grep -E 'state|pid'
+```
+
+A new `~/Library/LaunchAgents/com.daniilpet.opencode-jobs.plist` LaunchAgent runs
+the pump. It starts at login (`RunAtLoad`) and is restarted by launchd after a
+non-zero exit, subject to launchd's throttle interval (10 seconds, versus
+`RestartSec=2` on Linux). The absolute Node executable path is recorded in the
+agent at installation; the updater restarts the agent but never rewrites the
+path, so it must keep existing until a full manual reinstall. The pump is silent
+in normal operation; `pump.log` receives output only on failures and is not
+rotated automatically — review and truncate it if a crash loop inflates the
+file. The existing OpenCode service is not stopped.
+
+All three installers refuse to replace an existing plugin directory or jobs service.
 If an install fails, inspect the reported error and current state before retrying.
 A partially completed install can leave a plugin or service behind; do not treat
 file presence as successful installation, and do not delete it without checking
@@ -128,7 +168,8 @@ directory, restarts the pump, verifies the installed version and that the
 preserved job state is unchanged, and automatically restores the previous
 runtime if any of these checks fails. Windows shows one UAC confirmation for the
 whole stop-and-start cycle; an automatic rollback asks for a second one. Linux
-uses the user service manager without elevation. The updater never writes the
+uses the user service manager without elevation. macOS stops and restarts the
+LaunchAgent through `launchctl` without elevation. The updater never writes the
 OpenCode database and never touches the host, other plugins, or service
 configuration. Backups are kept under
 `${XDG_STATE_HOME:-~/.local/state}/opencode-jobs-backups/`; do not delete the
@@ -184,6 +225,17 @@ Linux:
 ```sh
 systemctl --user disable --now opencode-jobs.service
 ```
+
+macOS:
+
+```sh
+launchctl disable "gui/$(id -u)/com.daniilpet.opencode-jobs"
+launchctl bootout "gui/$(id -u)/com.daniilpet.opencode-jobs"
+```
+
+`disable` keeps the agent from starting at the next login; `bootout` stops the
+running agent. A `bootout` without a preceding `disable` stops the pump until the
+next login only.
 
 Stopping the pump does not cancel existing native shell processes. Cancel those
 jobs deliberately through `/cancel` before stopping if that is what you need.
