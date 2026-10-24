@@ -1,9 +1,15 @@
 const units = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
 const horizon = 30 * units.d;
 
+const clipDurationInput = (value) => {
+  const text = String(value).replace(/\s+/g, ' ').trim();
+  return text.length > 32 ? `${text.slice(0, 32)}…` : text;
+};
+
 export function duration(raw) {
-  if (!/^(?:\d+(?:\.\d+)?[smhd])+$/i.test(raw)) throw new Error('Некорректная длительность; пример: 10s, 5m, 1h30m.');
-  const value = [...raw.matchAll(/(\d+(?:\.\d+)?)([smhd])/gi)].reduce((sum, item) => sum + Number(item[1]) * units[item[2].toLowerCase()], 0);
+  const normalized = String(raw).replace(/\s+/g, '');
+  if (!/^(?:\d+(?:\.\d+)?[smhd])+$/i.test(normalized)) throw new Error(`Некорректная длительность "${clipDurationInput(raw)}"; пример: 10s, 5m, 1h30m; пробелы между единицами допускаются.`);
+  const value = [...normalized.matchAll(/(\d+(?:\.\d+)?)([smhd])/gi)].reduce((sum, item) => sum + Number(item[1]) * units[item[2].toLowerCase()], 0);
   if (!Number.isSafeInteger(value) || value <= 0 || value > horizon) throw new Error('Длительность должна быть положительной и не более 30 дней.');
   return value;
 }
@@ -58,14 +64,14 @@ export function parse(name, raw = '', now = Date.now()) {
     return config;
   }
   if (name === 'loop') {
-    const match = /^(\S+)\s+([\s\S]+)$/.exec(raw);
+    const match = /^(\S+)\s+([\s\S]+)$/.exec(raw.replace(/^loop\s+/i, ''));
     if (!match) throw new Error('Используйте /loop <интервал> <запрос>.');
     const interval = duration(match[1]);
     if (interval < 10000) throw new Error('Минимальный интервал: 10 секунд.');
     return { kind: 'loop', interval, prompt: match[2] };
   }
   if (name === 'schedule') {
-    const match = /^(in|at)\s+(\S+)\s+([\s\S]+)$/.exec(raw);
+    const match = /^(in|at)\s+(\S+)\s+([\s\S]+)$/.exec(raw.replace(/^schedule\s+/i, ''));
     if (!match) throw new Error('Используйте /schedule in <длительность> <запрос> или at <ISO-дата с поясом> <запрос>.');
     if (match[1] === 'at' && !/(?:Z|[+-]\d{2}:\d{2})$/.test(match[2])) throw new Error('ISO-дата должна явно задавать часовой пояс.');
     const due = match[1] === 'in' ? now + duration(match[2]) : Date.parse(match[2]);

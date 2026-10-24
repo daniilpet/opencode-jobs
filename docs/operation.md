@@ -20,12 +20,14 @@ Existing installations require a separately reviewed manual update.
 The model-facing tools have names `opencode_jobs_background`,
 `opencode_jobs_monitor`, `opencode_jobs_schedule`, `opencode_jobs_loop`,
 `opencode_jobs_jobs`, and `opencode_jobs_cancel`. They accept the same arguments
-in a `raw` string. Command text is passed to the existing native shell unchanged.
+in a `raw` string; a leading `loop`/`schedule` keyword in tool `raw` is accepted
+and ignored. Command text is passed to the existing native shell unchanged.
 Choose commands for your platform; the plugin does not translate PowerShell to sh.
 The six slash-command names are registered at the session's location; avoid
 loading another plugin that defines the same names.
 
-Durations accept `s`, `m`, `h`, or `d`, including combinations such as `1h30m`.
+Durations accept `s`, `m`, `h`, or `d`, including combinations such as `1h30m`;
+spaces between units are accepted, so `2h 15m` equals `2h15m`.
 The minimum loop interval is 10 seconds.
 Absolute deadlines must contain a time-zone offset. The schedule horizon is
 30 days. A node allows up to 20 active jobs and 100 outstanding plugin messages,

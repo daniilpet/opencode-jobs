@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Accept spaces between duration units in every duration input, including the
+  tool `timeout` field (`2h 15m` equals `2h15m`), and name the rejected value
+  in the duration error message. The model-facing `opencode_jobs_*` tools now
+  validate `timeout`/`maxRuns` locally before the RPC call, so an invalid
+  duration surfaces as the parser message instead of a host HTTP 500.
+- Tolerate a leading `loop`/`schedule` keyword in tool `raw` arguments (the
+  slash commands already strip it) and document the bare tool `raw` syntax
+  for loop.
+- Expiry by the execution budget now reports the worker session and its last
+  observed execution status (still active, interrupted, not finished) instead
+  of the bare expiry-only reason.
 - Add a macOS (darwin) installer. `scripts/install-darwin.sh` installs the
   verified bundle under `~/.config/opencode/plugins/jobs` and supervises the pump
   with a per-user launchd LaunchAgent (`com.daniilpet.opencode-jobs`): it starts
