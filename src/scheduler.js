@@ -6,6 +6,15 @@ import { sanitize } from './sanitize.js';
 const isSubagentBackground = (job) => job.kind === 'background' && Boolean(job.createdBy && job.createdBy !== job.sessionID);
 const isSubagentWorker = (job) => ['schedule', 'loop'].includes(job.kind) && Boolean(job.createdBy && job.createdBy !== job.sessionID);
 
+// Причина истечения по бюджету: без worker-сессии срок истёк до допуска;
+// иначе добавляем последний наблюдённый статус исполнения worker-а.
+const workerExpiryLabels = { pending: 'не завершилась', running: 'была активна в последнем наблюдении', interrupted: 'прервана' };
+export const expiryReason = (job) => {
+  if (!job.workerID) return 'Истёк предельный срок работы.';
+  const label = workerExpiryLabels[job.executionStatus] ?? `последнее состояние: ${job.executionStatus ?? 'неизвестно'}`;
+  return `Истёк предельный срок работы. Сессия задания ${job.workerID} ${label}; подтверждённого результата нет.`;
+};
+
 // result/failure schedule/loop: событие × создатель-ребёнок: 00/01 -> наблюдать;
 // 10 -> root, 11 -> root и исходный createdBy. Prompt всегда адресован только worker.
 // Background сохраняет native child + plugin root; monitor не расширяется.
@@ -96,7 +105,7 @@ export class Scheduler {
       }
       if (job.stopPending) { await this.cleanup(job); continue; }
       if (!job.workerResult && job.expiresAt <= now && (job.status === 'active' || job.runMessage || (!job.workerID && !isSubagentBackground(job) && job.messages?.length && !['expired', 'failed', 'cancelled'].includes(job.status)))) {
-        await this.stop(job, 'expired', 'Истёк предельный срок работы.', now, Boolean(job.workerID) || isSubagentBackground(job));
+        await this.stop(job, 'expired', expiryReason(job), now, Boolean(job.workerID) || isSubagentBackground(job));
         continue;
       }
       if (job.status !== 'active') continue;
@@ -436,7 +445,7 @@ export class Scheduler {
         const current = this.io.now?.() ?? now;
         if (job.stopPending && this.keepCancelledResult(job, entry.id)) continue;
         if (job.stopPending || (job.expiresAt <= current && ['prompt', 'output'].includes(entry.type))) {
-          await this.stop(job, job.stopPending ? job.status : 'expired', job.stopPending ? job.error : 'Истёк предельный срок работы.', current, job.stopPending ? Boolean(job.deferredFailure) : Boolean(job.workerID));
+          await this.stop(job, job.stopPending ? job.status : 'expired', job.stopPending ? job.error : expiryReason(job), current, job.stopPending ? Boolean(job.deferredFailure) : Boolean(job.workerID));
           continue;
         }
         if (entry.type === 'prompt' && current - entry.due > 5000) {
@@ -483,7 +492,7 @@ export class Scheduler {
       await this.stopOverflow(now);
       for (const job of this.state.jobs) {
         if (job.stopPending) await this.cleanup(job);
-        else if (!job.workerResult && job.expiresAt <= now && (job.status === 'active' || job.runMessage || (!job.workerID && !isSubagentBackground(job) && job.messages?.length && !['expired', 'failed', 'cancelled'].includes(job.status)))) await this.stop(job, 'expired', 'Истёк предельный срок работы.', now, Boolean(job.workerID) || isSubagentBackground(job));
+        else if (!job.workerResult && job.expiresAt <= now && (job.status === 'active' || job.runMessage || (!job.workerID && !isSubagentBackground(job) && job.messages?.length && !['expired', 'failed', 'cancelled'].includes(job.status)))) await this.stop(job, 'expired', expiryReason(job), now, Boolean(job.workerID) || isSubagentBackground(job));
       }
       await this.flush(now);
       for (const job of this.state.jobs) {

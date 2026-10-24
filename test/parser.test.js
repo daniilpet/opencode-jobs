@@ -51,3 +51,21 @@ test('расписание в прошлом и более тридцати дн
   assert.throws(() => parse('schedule', 'at 2026-10-04T12:00:00Z проверь', Date.parse('2026-10-05T12:00:00Z')), /будущ/);
   assert.throws(() => parse('schedule', 'in 31d проверь', 0), /30/);
 });
+
+test('длительность допускает пробелы между единицами', () => {
+  assert.equal(duration('2h 15m'), 8100000);
+  assert.equal(duration('1 h 30 m'), 5400000);
+});
+
+test('ошибка длительности называет отклонённое значение', () => {
+  assert.throws(() => duration('loop'), /"loop"/);
+  assert.throws(() => duration('завтра'), /"завтра"/);
+});
+
+test('ключевое слово loop в начале raw отбрасывается', () => {
+  assert.deepEqual(parse('loop', 'loop 10s проверь результат'), { kind: 'loop', interval: 10000, prompt: 'проверь результат' });
+});
+
+test('ключевое слово schedule в начале raw отбрасывается', () => {
+  assert.deepEqual(parse('schedule', 'schedule in 2m проверь сборку', 1000), { kind: 'schedule', due: 121000, prompt: 'проверь сборку' });
+});

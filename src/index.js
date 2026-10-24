@@ -207,10 +207,13 @@ export default {
       for (const name of names) editor.add({
         name: `opencode_jobs_${name}`,
         description: `${descriptions[name]} Задания локальны этому узлу. Сроки сохраняются при перезапуске. При сбое исходный запрос не повторяется автоматически; уведомление требует решения модели.`,
-        input: { type: 'object', properties: { raw: { type: 'string', description: 'Исходные аргументы команды; для monitor: --regex <pattern> -- <shell-команда>; schedule: in 5m <запрос>; loop: 5m <запрос>.' }, ...(['background', 'monitor', 'loop', 'schedule'].includes(name) ? { timeout: { type: 'string', description: 'Конечный срок работы: 30m для background/schedule, 1h для monitor/loop по умолчанию. Максимум 24h, увеличение только для явно запрошенной длительной работы. Ожидание даты schedule учитывается отдельно.' } } : {}), ...(name === 'loop' ? { maxRuns: { type: 'integer', minimum: 1, maximum: 100, description: 'Предельное число срабатываний: по умолчанию 12, максимум 100. Срок и счётчик действуют одновременно.' } } : {}) }, ...(name === 'jobs' ? {} : { required: ['raw'] }), additionalProperties: false },
+        input: { type: 'object', properties: { raw: { type: 'string', description: 'Исходные аргументы команды; для monitor: --regex <pattern> -- <shell-команда>; schedule: in 5m <запрос>; loop: 5m <запрос> без слова loop (ведущие schedule/loop в raw отбрасываются). Длительности: 10s, 5m, 1h30m; в timeout допускаются пробелы между единицами.' }, ...(['background', 'monitor', 'loop', 'schedule'].includes(name) ? { timeout: { type: 'string', description: 'Конечный срок работы: 30m для background/schedule, 1h для monitor/loop по умолчанию. Максимум 24h, увеличение только для явно запрошенной длительной работы. Ожидание даты schedule учитывается отдельно.' } } : {}), ...(name === 'loop' ? { maxRuns: { type: 'integer', minimum: 1, maximum: 100, description: 'Предельное число срабатываний: по умолчанию 12, максимум 100. Срок и счётчик действуют одновременно.' } } : {}) }, ...(name === 'jobs' ? {} : { required: ['raw'] }), additionalProperties: false },
         options: { codemode: false, ...(['background', 'monitor'].includes(name) ? { permission: 'shell' } : {}) },
         async execute(input, context) {
           const config = parse(name, input.raw ?? '');
+          // Превалидация лимитов на клиенте: ошибка парсера дойдёт до вызывающей
+          // сессии текстом, а не HTTP 500 из серверного RPC-хендлера.
+          if (['background', 'monitor', 'loop', 'schedule'].includes(config.kind)) jobLimits(config.kind, input.timeout, input.maxRuns);
           if (name === 'jobs') {
             const result = await call('list', { sessionID: context.sessionID }, context.signal);
             return { content: JSON.stringify({ jobs: result.jobs.map(presentJob), lastTick: result.lastTick, healthy: result.healthy, pending: result.pending }) };
