@@ -1,3 +1,9 @@
+# Changelog
+
+## Unreleased
+
+## 0.5.1 - shell hardening and platform expansion
+
 - Accept spaces between duration units in every duration input, including the
   tool `timeout` field (`2h 15m` equals `2h15m`), and name the rejected value
   in the duration error message. The model-facing `opencode_jobs_*` tools now

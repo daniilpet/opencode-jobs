@@ -1,6 +1,6 @@
 # Using jobs
 
-This guide describes **0.5.0 preview**, adding the single-confirmation updater,
+This guide describes **0.5.1 preview**, adding the single-confirmation updater,
 subagent completion delivery and host-version range support. Its finite limits,
 dedicated worker sessions, and security hardening are not in the v0.1.0 bundle.
 Existing installations require a separately reviewed manual update.
