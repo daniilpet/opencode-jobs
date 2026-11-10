@@ -35,10 +35,25 @@
     "solid-js": "1.9.12"
   },
   "overrides": {
-    "seroval": "^1.6.8",
+    "seroval": "^1.8.0",
     "@opentui/solid@0.5.17": {
       "@babel/core": "^7.29.7"
-    }
+    },
+    "@npmcli/arborist": "10.0.4",
+    "@npmcli/config": "11.2.0",
+    "@npmcli/map-workspaces": "6.0.0",
+    "@npmcli/metavuln-calculator": "10.0.0",
+    "@npmcli/package-json": "8.0.0",
+    "@npmcli/run-script": "11.0.0",
+    "pacote": "22.0.1",
+    "cacache": "21.0.1",
+    "minimatch": "11.0.5",
+    "npm-registry-fetch": "20.0.1",
+    "glob": "14.0.4",
+    "sigstore": "5.0.1",
+    "@sigstore/sign": "5.1.0",
+    "@sigstore/tuf": "5.0.1",
+    "@tufjs/models": "5.0.2"
   },
   "engines": {
     "node": ">=20.19"
