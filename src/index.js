@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { Jobs } from './contract.js';
 import { Scheduler } from './scheduler.js';
 import { Monitor } from './monitor.js';
-import { parse } from './parser.js';
+import { parse, utf8Command } from './parser.js';
 import { call, request } from './bridge.js';
 import { anchorDirectory } from './paths.js';
 import { sanitize } from './sanitize.js';
@@ -237,7 +237,7 @@ export default {
               if (remaining <= 0) throw new Error('Истёк срок ожидания запуска команды.');
               waitSignal = AbortSignal.any([context.signal, lifetime, launch.signal, AbortSignal.timeout(remaining)]);
               waitSignal.throwIfAborted();
-              const result = await native.execute({ command: config.command, background: true, timeout: job.timeout }, {
+              const result = await native.execute({ command: utf8Command(config.command), background: true, timeout: job.timeout }, {
                 ...context,
                 signal: waitSignal,
                 progress: async (metadata) => {
@@ -271,7 +271,7 @@ export default {
       for (const name of names) editor.add({
         name,
         description: descriptions[name],
-        execute: ({ sessionID, prompt, delivery }) => ctx.session.prompt({ ...prompt, sessionID, delivery, text: `Вызови инструмент opencode_jobs_${name}. Передай raw точно как аргументы ниже; для jobs raw пустой. Верни результат, не выполняй задачу повторно другими инструментами.\n\n${prompt.text}` }),
+        execute: ({ sessionID, prompt, delivery }) => ctx.session.prompt({ ...prompt, sessionID, delivery, text: `Вызови инструмент opencode_jobs_${name}. Передай raw ДОСЛОВНО посимвольно: сохрани $, кавычки, обратные кавычки, пробелы и переводы строк без изменений и интерполяции. Не оборачивай команду в дополнительный pwsh -Command (хост уже запускает PowerShell); если вложение неизбежно — только одинарные кавычки у вложенного -Command. Для jobs raw пустой. Верни результат, не выполняй задачу повторно другими инструментами.\n\n${prompt.text}` }),
       });
     });
     return async () => {

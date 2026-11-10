@@ -1,7 +1,3 @@
-# Changelog
-
-## Unreleased
-
 - Accept spaces between duration units in every duration input, including the
   tool `timeout` field (`2h 15m` equals `2h15m`), and name the rejected value
   in the duration error message. The model-facing `opencode_jobs_*` tools now
@@ -33,6 +29,16 @@
   (arm64, Node 24.22.0), covering native background/monitor, subagent result
   delivery, permission denial/ask flows, approval expiry, cancellation races,
   finite timeouts and worker isolation.
+- Reject nested `pwsh -Command` invocations with double-quoted arguments
+  containing `$` before launch: PowerShell interpolates variables inside the
+  nested string, silently mangling scripts (`while ($true)` -> `while (True)`).
+  Pass script bodies directly or use single quotes for nested `-Command`.
+- On Windows, prepend `[Console]::OutputEncoding=[Text.Encoding]::UTF8` to
+  background and monitor commands so PowerShell output and error text are
+  captured as UTF-8 instead of the
+  console's OEM code page (CP866); set `SHELL=cmd` to opt out for cmd.exe.
+  The slash command now instructs byte-exact raw preservation and the
+  no-nesting/single-quote rule.
 
 ## 0.5.0 - updater and subagent completion
 

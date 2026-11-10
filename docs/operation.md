@@ -428,3 +428,35 @@ For a bug report, include versions, platform, a sanitized reproduction, and the
 relevant job status. Do not attach databases, full session exports, or unredacted
 logs. Tests leave temporary files intact so you can inspect failures; remove only
 the test artifacts you intend to discard.
+
+### 5.4. PowerShell specifics
+
+On Windows, background and monitor commands run under `pwsh -Command` chosen by
+the host. Two failure modes are handled explicitly:
+
+**Console encoding.** The Windows console defaults to the OEM code page (CP866
+on Russian systems), and the output file is read as UTF-8. On Windows the
+plugin prepends `[Console]::OutputEncoding=[Text.Encoding]::UTF8;` to
+background and monitor commands, so captured output is UTF-8. Set `SHELL=cmd`
+to skip this PowerShell-only prefix when the command must run under cmd.exe.
+A nested `pwsh` process may choose its own encoding or inherit the console
+setting depending on how it is launched; avoid nesting (see below).
+
+**Nested `pwsh -Command` with double quotes.** A nested invocation such as
+`pwsh -NoProfile -Command "while ($true) { ... }"` interpolates `$true` into
+the string `True` inside the nested double-quoted argument. The plugin rejects
+such commands before launch with an actionable error instead of letting
+PowerShell interpolate variables. Pass the script body directly (the host
+already runs PowerShell), or use single quotes for the nested `-Command`
+argument:
+
+```text
+# Rejected before launch (interpolates $true -> True):
+pwsh -NoProfile -Command "while ($true) { Write-Output 1 }"
+
+# Accepted (script body directly, host already runs pwsh):
+while ($true) { Write-Output 1; break }
+
+# Accepted (nested invocation with single quotes):
+pwsh -NoProfile -Command 'while ($true) { Write-Output 1; break }'
+```
