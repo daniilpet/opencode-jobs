@@ -22,11 +22,42 @@ function tokens(raw) {
   return result;
 }
 
+// Вложенный pwsh -Command с двойными кавычками и $ интерполирует переменные: while ($true) -> while (True).
+// Проверяем только запуск PowerShell в позиции начала команды/подкоманды: упоминание
+// pwsh в аргументах другой команды или внутри строки-литерала не считается вложением.
+// Двойная кавычка разбирается с учётом экранирования `"` и "". Проверяются все вхождения.
+export function assertSafeCommand(command) {
+  const pattern = /(?:^|(?<=[;|&{}(\n])\s*)(?:pwsh|powershell)(?:\.exe)?(?=\s|$)/gi;
+  let match;
+  while ((match = pattern.exec(command))) {
+    const rest = command.slice(pattern.lastIndex);
+    const argument = /-Command\s+/i.exec(rest);
+    if (!argument) continue;
+    const after = rest.slice(argument.index + argument[0].length).trimStart();
+    if (after[0] !== '"') continue;
+    for (let index = 1; index < after.length; index += 1) {
+      if (after[index] === '`' && after[index + 1] === '"') { index += 1; continue; }
+      if (after[index] === '"' && after[index + 1] === '"') { index += 1; continue; }
+      if (after[index] === '"') break;
+      if (after[index] === '$') {
+        throw new Error('Вложенный pwsh -Command с двойными кавычками и $ интерполирует переменные. Уберите вложение (хост уже запускает PowerShell) или используйте одинарные кавычки у вложенного -Command.');
+      }
+    }
+  }
+}
+
+export function utf8Command(command) {
+  if (process.platform !== 'win32') return command;
+  if ((process.env.SHELL ?? '').toLowerCase().includes('cmd')) return command;
+  return `[Console]::OutputEncoding=[Text.Encoding]::UTF8; ${command}`;
+}
+
 export function parse(name, raw = '', now = Date.now()) {
   raw = raw.trim();
   if (raw.length > 32768) throw new Error('Аргументы превышают 32 КиБ.');
   if (name === 'background') {
     if (!raw) throw new Error('Нужна shell-команда.');
+    assertSafeCommand(raw);
     return { kind: 'background', command: raw };
   }
   if (name === 'monitor') {
@@ -39,6 +70,7 @@ export function parse(name, raw = '', now = Date.now()) {
     if (!separator) throw new Error('Используйте --regex <выражение> -- <команда>.');
     const command = raw.slice(separator.index + separator.length).trim();
     if (!command) throw new Error('Нужна shell-команда.');
+    assertSafeCommand(command);
     const args = tokens(raw.slice(0, separator.index));
     const config = { kind: 'monitor', pattern: '', before: 3, after: 3, debounce: 5000, command };
     const seen = new Set();
