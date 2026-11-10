@@ -69,47 +69,33 @@ maintainer and keep affected users' data out of the report.
 
 ## Dependency security and compatibility
 
-The source toolchain preserves OpenCode/plugin SDK 2.0.24, OpenTUI 0.5.14, and
-Solid/preset 1.9.12. Two targeted `package.json` overrides address advisories that
-cannot be fixed by refreshing the lockfile within the upstream ranges:
+The source toolchain pins OpenCode/plugin SDK 2.0.32 and OpenTUI 0.5.17 with
+Solid/preset 1.9.12. Targeted `package.json` overrides address advisories that
+cannot be fixed by refreshing the lockfile within the upstream ranges. Each
+override exists to remediate a specific published vulnerability in a transitive
+dependency; it is not a ceiling "just in case", and it is revisited when new
+advisories appear.
 
-- `seroval: ^1.6.8` replaces Solid's `~1.5.0` requirement. The previous 1.5.6
-  was affected by critical
-  [GHSA-p6vx-979v-rg4c](https://github.com/advisories/GHSA-p6vx-979v-rg4c)
-  (plugin-produced callable invocation during `fromJSON()`, fixed in 1.6.2) and
-  high [GHSA-jp82-f5mq-hwhp](https://github.com/advisories/GHSA-jp82-f5mq-hwhp)
-  (memory exhaustion during JSON deserialization, fixed in 1.6.3). The selected
-  minimum uses the current patched 1.x release; `seroval-plugins` 1.5.6 permits
-  it through its `^1.0` peer range. This override covers all Seroval consumers
-  in the source dependency tree to avoid retaining a vulnerable nested copy.
-- `@opentui/solid@0.5.14` overrides only its `@babel/core` dependency to
-  `^7.29.7`, sharing the patched version already used by the root build. The
-  upstream exact 7.28.0 pin is affected by low
-  [GHSA-4x5r-pxfx-6jf8](https://github.com/advisories/GHSA-4x5r-pxfx-6jf8), fixed
-  in 7.29.6. Exploitation requires control of compiled source, access to the
-  output, and knowledge of a target source-map path. Compile trusted sources only.
+- `seroval: ^1.8.0` (was ^1.6.8) — fixes the remaining moderate advisory on
+  seroval itself; `check-security-dependencies.js` covers JSON round-trips,
+  Solid resource serialization with hydration, web plugins and the OpenTUI
+  TSX/Babel transformer on Node 20/22.
+- npm CLI tooling inside `@opencode/util`: `@npmcli/arborist@10.0.4`,
+  `@npmcli/config@11.2.0`, `@npmcli/map-workspaces@6.0.0`,
+  `@npmcli/metavuln-calculator@10.0.0`, `@npmcli/package-json@8.0.0`,
+  `@npmcli/run-script@11.0.0`, `pacote@22.0.1`, `cacache@21.0.1`,
+  `minimatch@11.0.5`, `npm-registry-fetch@20.0.1`, `glob@14.0.4` — upgrades
+  the bundled npm toolchain to patched versions, clearing the moderate
+  advisories in that chain without changing `@opencode/plugin` or OpenTUI.
+- `sigstore@5.0.1`, `@sigstore/sign@5.1.0`, `@sigstore/tuf@5.0.1`,
+  `@tufjs/models@5.0.2` — patched sigstore/TUF family used by the same
+  toolchain.
 
-These ranges allow subsequent compatible fixes. Reassess the overrides when
-upstream constraints change; do not remove them until a clean resolution passes
-the full audit and compatibility checks. After `npm ci --ignore-scripts`, run:
-
-```sh
-npm run check:security-dependencies
-npm run audit:dependencies
-```
-
-The compatibility check exercises Seroval with the existing web plugins, Solid's
-server resource serialization and generated hydration data, and OpenTUI's own
-TSX/Babel transformer. The normal jobs build uses the root Babel and would not
-exercise these transitive paths by itself. This check supplements the normal
-test/build and isolated host integration checks.
-
-The jobs server and pump do not import Seroval; the vendored client's JavaScript
-has no Seroval import. The installed bundle excludes `node_modules`, but its TUI
-imports shared Solid/OpenTUI modules supplied by OpenCode. These source overrides
-do not update an installed host or establish the safety of its dependency tree.
-A clean `npm audit --omit=dev` cannot prove runtime safety. Audit results are a
-snapshot of known advisories and must be checked again when dependencies change.
+The verified result is `npm audit --json: total 0` against registry.npmjs.org
+on Windows and Linux, with the full backend/OpenTUI suite, build and isolated
+integration green. These are dev-only dependencies: the shipped runtime bundle
+does not install them, so their advisories do not affect end users of the
+plugin.
 
 ## Continuous security checks
 
