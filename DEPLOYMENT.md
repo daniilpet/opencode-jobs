@@ -1,6 +1,6 @@
 # Installation and operations
 
-This guide targets **0.5.0 preview**, including the single-confirmation updater,
+This guide targets **0.5.1 preview**, including the single-confirmation updater,
 subagent completion delivery, host-version range support, subagent
 job attribution, connection diagnostics, terminal task
 management, finite job limits and dedicated scheduled-work sessions. Existing
@@ -53,16 +53,16 @@ On Linux, with both files in the current directory:
 
 ```sh
 sha256sum -c SHA256SUMS
-tar -xzf opencode-jobs-0.5.0.tar.gz
-cd opencode-jobs-0.5.0
+tar -xzf opencode-jobs-0.5.1.tar.gz
+cd opencode-jobs-0.5.1
 ```
 
-On Windows, compare `Get-FileHash .\opencode-jobs-0.5.0.tar.gz -Algorithm SHA256`
+On Windows, compare `Get-FileHash .\opencode-jobs-0.5.1.tar.gz -Algorithm SHA256`
 with the archive's line in `SHA256SUMS`, then:
 
 ```powershell
-tar -xzf .\opencode-jobs-0.5.0.tar.gz
-Set-Location .\opencode-jobs-0.5.0
+tar -xzf .\opencode-jobs-0.5.1.tar.gz
+Set-Location .\opencode-jobs-0.5.1
 ```
 
 On macOS, verify with `shasum` (there is no `sha256sum` binary) and extract the
@@ -70,8 +70,8 @@ same way:
 
 ```sh
 shasum -a 256 -c SHA256SUMS
-tar -xzf opencode-jobs-0.5.0.tar.gz
-cd opencode-jobs-0.5.0
+tar -xzf opencode-jobs-0.5.1.tar.gz
+cd opencode-jobs-0.5.1
 ```
 
 The archive includes `.runtime/package` and `scripts/`. Do not relocate either
@@ -158,7 +158,7 @@ single-confirmation update:
 node scripts/update.js --check                          # только диагностика, без изменений
 node scripts/update.js                                  # последний опубликованный релиз
 node scripts/update.js 0.5.0                            # указанная версия
-node scripts/update.js --file opencode-jobs-0.5.0.tar.gz  # офлайн; SHA256SUMS лежит рядом
+node scripts/update.js --file opencode-jobs-0.5.1.tar.gz  # офлайн; SHA256SUMS лежит рядом
 ```
 
 The updater downloads the release, verifies it against `SHA256SUMS`, refuses to
